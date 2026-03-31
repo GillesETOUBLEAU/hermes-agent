@@ -32,7 +32,9 @@ WORKDIR /opt/hermes
 COPY package.json package-lock.json ./
 COPY web/package.json web/package-lock.json web/
 
+# Install Node dependencies, Google Workspace CLI, and Playwright as root
 RUN npm install --prefer-offline --no-audit && \
+    npm install -g @googleworkspace/cli && \
     npx playwright install --with-deps chromium --only-shell && \
     (cd web && npm install --prefer-offline --no-audit) && \
     npm cache clean --force

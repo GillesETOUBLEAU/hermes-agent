@@ -73,6 +73,24 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
+# gws CLI — set up config directory and bridge credentials if available
+GWS_CONFIG_DIR="$HERMES_HOME/gws-config"
+mkdir -p "$GWS_CONFIG_DIR"
+export GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$GWS_CONFIG_DIR"
+
+# If gws credentials file is set via env var, use it directly
+if [ -n "$GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE" ]; then
+    echo "[entrypoint] gws CLI: using credentials from GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"
+# Otherwise, bridge from existing google-workspace Python skill token
+elif [ -f "$HERMES_HOME/google_token.json" ]; then
+    BRIDGE_SCRIPT="$INSTALL_DIR/skills/productivity/gws-cli/scripts/bridge_auth.py"
+    if [ -f "$BRIDGE_SCRIPT" ]; then
+        python3 "$BRIDGE_SCRIPT" --bridge 2>/dev/null && \
+            export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="$GWS_CONFIG_DIR/credentials.json" && \
+            echo "[entrypoint] gws CLI: bridged credentials from google-workspace skill"
+    fi
+fi
+
 # Debug: verify env vars are visible
 echo "[entrypoint] DISCORD_ALLOWED_USERS=${DISCORD_ALLOWED_USERS:-EMPTY}"
 echo "[entrypoint] DISCORD_ALLOW_ALL_USERS=${DISCORD_ALLOW_ALL_USERS:-EMPTY}"
