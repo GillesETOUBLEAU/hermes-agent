@@ -21,6 +21,8 @@ Agent workflow:
   6. Run --check to verify. Done.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
