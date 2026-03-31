@@ -53,14 +53,11 @@ if [ ! -f "$HERMES_HOME/.env" ]; then
     cp "$INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
 fi
 
-# config.yaml
-if [ ! -f "$HERMES_HOME/config.yaml" ]; then
-    # Use Railway-optimized config when deployed on Railway
-    if [ -n "$RAILWAY_ENVIRONMENT" ] && [ -f "$INSTALL_DIR/docker/railway-config.yaml" ]; then
-        cp "$INSTALL_DIR/docker/railway-config.yaml" "$HERMES_HOME/config.yaml"
-    else
-        cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
-    fi
+# config.yaml — on Railway, always use the Railway-optimized config
+if [ -n "$RAILWAY_ENVIRONMENT" ] && [ -f "$INSTALL_DIR/docker/railway-config.yaml" ]; then
+    cp "$INSTALL_DIR/docker/railway-config.yaml" "$HERMES_HOME/config.yaml"
+elif [ ! -f "$HERMES_HOME/config.yaml" ]; then
+    cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
 fi
 
 # SOUL.md
