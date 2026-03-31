@@ -73,4 +73,12 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
+# Debug: verify env vars are visible
+echo "[entrypoint] DISCORD_ALLOWED_USERS=${DISCORD_ALLOWED_USERS:-EMPTY}"
+echo "[entrypoint] DISCORD_ALLOW_ALL_USERS=${DISCORD_ALLOW_ALL_USERS:-EMPTY}"
+echo "[entrypoint] ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:+set}"
+echo "[entrypoint] .env contents:"
+cat "$HERMES_HOME/.env"
+echo "[entrypoint] --- end .env ---"
+
 exec hermes "$@"
