@@ -19,4 +19,5 @@ WORKDIR /opt/hermes
 RUN chmod +x /opt/hermes/docker/entrypoint.sh
 
 ENV HERMES_HOME=/opt/data
+ENV PYTHONUNBUFFERED=1
 ENTRYPOINT [ "/opt/hermes/docker/entrypoint.sh" ]
