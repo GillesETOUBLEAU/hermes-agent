@@ -1,5 +1,8 @@
 FROM debian:13.4
 
+LABEL maintainer="GillesETOUBLEAU"
+LABEL railway.deploy="true"
+
 RUN apt-get update
 RUN apt-get install -y nodejs npm python3 python3-pip ripgrep ffmpeg gcc python3-dev libffi-dev
 
@@ -16,5 +19,4 @@ WORKDIR /opt/hermes
 RUN chmod +x /opt/hermes/docker/entrypoint.sh
 
 ENV HERMES_HOME=/opt/data
-VOLUME [ "/opt/data" ]
 ENTRYPOINT [ "/opt/hermes/docker/entrypoint.sh" ]
