@@ -11,8 +11,11 @@ INSTALL_DIR="/opt/hermes"
 # get the consolidated layout from get_hermes_dir().
 mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills}
 
-# .env
-if [ ! -f "$HERMES_HOME/.env" ]; then
+# .env — on Railway, use an empty .env so Railway-injected env vars are not
+# overwritten by stale values from .env.example (load_dotenv override=True).
+if [ -n "$RAILWAY_ENVIRONMENT" ]; then
+    : > "$HERMES_HOME/.env"
+elif [ ! -f "$HERMES_HOME/.env" ]; then
     cp "$INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
 fi
 
