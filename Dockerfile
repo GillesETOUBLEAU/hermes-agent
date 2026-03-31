@@ -11,6 +11,7 @@ WORKDIR /opt/hermes
 
 RUN pip install -e ".[all]" --break-system-packages
 RUN npm install
+RUN npm install -g @googleworkspace/cli
 RUN npx playwright install --with-deps chromium
 WORKDIR /opt/hermes/scripts/whatsapp-bridge
 RUN npm install
