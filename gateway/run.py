@@ -1693,6 +1693,9 @@ class GatewayRunner:
 
         # Check if user is authorized
         if not self._is_user_authorized(source):
+            import os as _os
+            _allowed = _os.getenv("DISCORD_ALLOWED_USERS", "EMPTY")
+            print(f"[AUTH] UNAUTHORIZED user_id={source.user_id!r} user_name={source.user_name!r} platform={source.platform} DISCORD_ALLOWED_USERS={_allowed!r}", flush=True)
             logger.warning("Unauthorized user: %s (%s) on %s", source.user_id, source.user_name, source.platform.value)
             # In DMs: offer pairing code. In groups: silently ignore.
             if source.chat_type == "dm" and self._get_unauthorized_dm_behavior(source.platform) == "pair":
