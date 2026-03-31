@@ -70,15 +70,4 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
-# Debug: show active config on startup
-echo "=== Railway Debug ==="
-echo "HERMES_HOME=$HERMES_HOME"
-echo "RAILWAY_ENVIRONMENT=${RAILWAY_ENVIRONMENT:-unset}"
-echo "HERMES_INFERENCE_PROVIDER=${HERMES_INFERENCE_PROVIDER:-unset}"
-echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:+set (${#ANTHROPIC_API_KEY} chars)}"
-echo "DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:+set (${#DISCORD_BOT_TOKEN} chars)}"
-echo "config.yaml contents:"
-cat "$HERMES_HOME/config.yaml"
-echo "=== End Debug ==="
-
 exec hermes "$@"
