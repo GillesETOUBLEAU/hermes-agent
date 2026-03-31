@@ -73,6 +73,20 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
+# Google OAuth — decode base64 credentials from env vars into files.
+# Set GOOGLE_TOKEN_B64 and GOOGLE_CLIENT_SECRET_B64 in Railway dashboard.
+# Generate them locally with:
+#   cat ~/.hermes/google_token.json | base64 | tr -d '\n'
+#   cat ~/.hermes/google_client_secret.json | base64 | tr -d '\n'
+if [ -n "$GOOGLE_TOKEN_B64" ] && [ ! -f "$HERMES_HOME/google_token.json" ]; then
+    echo "$GOOGLE_TOKEN_B64" | base64 -d > "$HERMES_HOME/google_token.json"
+    echo "[entrypoint] Google OAuth: decoded token from GOOGLE_TOKEN_B64"
+fi
+if [ -n "$GOOGLE_CLIENT_SECRET_B64" ] && [ ! -f "$HERMES_HOME/google_client_secret.json" ]; then
+    echo "$GOOGLE_CLIENT_SECRET_B64" | base64 -d > "$HERMES_HOME/google_client_secret.json"
+    echo "[entrypoint] Google OAuth: decoded client secret from GOOGLE_CLIENT_SECRET_B64"
+fi
+
 # gws CLI — set up config directory and bridge credentials if available
 GWS_CONFIG_DIR="$HERMES_HOME/gws-config"
 mkdir -p "$GWS_CONFIG_DIR"
