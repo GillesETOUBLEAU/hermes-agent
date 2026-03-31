@@ -74,17 +74,18 @@ if [ -d "$INSTALL_DIR/skills" ]; then
 fi
 
 # Google OAuth — decode base64 credentials from env vars into files.
+# Always overwrite so Railway env var updates take effect on redeploy.
 # Set GOOGLE_TOKEN_B64 and GOOGLE_CLIENT_SECRET_B64 in Railway dashboard.
-# Generate them locally with:
+# Generate locally with:
 #   cat ~/.hermes/google_token.json | base64 | tr -d '\n'
 #   cat ~/.hermes/google_client_secret.json | base64 | tr -d '\n'
-if [ -n "$GOOGLE_TOKEN_B64" ] && [ ! -f "$HERMES_HOME/google_token.json" ]; then
+if [ -n "$GOOGLE_TOKEN_B64" ]; then
     echo "$GOOGLE_TOKEN_B64" | base64 -d > "$HERMES_HOME/google_token.json"
-    echo "[entrypoint] Google OAuth: decoded token from GOOGLE_TOKEN_B64"
+    echo "[entrypoint] Google OAuth: decoded token → $HERMES_HOME/google_token.json"
 fi
-if [ -n "$GOOGLE_CLIENT_SECRET_B64" ] && [ ! -f "$HERMES_HOME/google_client_secret.json" ]; then
+if [ -n "$GOOGLE_CLIENT_SECRET_B64" ]; then
     echo "$GOOGLE_CLIENT_SECRET_B64" | base64 -d > "$HERMES_HOME/google_client_secret.json"
-    echo "[entrypoint] Google OAuth: decoded client secret from GOOGLE_CLIENT_SECRET_B64"
+    echo "[entrypoint] Google OAuth: decoded client secret → $HERMES_HOME/google_client_secret.json"
 fi
 
 # gws CLI — set up config directory and bridge credentials if available
@@ -104,6 +105,10 @@ elif [ -f "$HERMES_HOME/google_token.json" ]; then
             echo "[entrypoint] gws CLI: bridged credentials from google-workspace skill"
     fi
 fi
+
+# Debug: verify Google OAuth files exist
+echo "[entrypoint] google_token.json: $([ -f "$HERMES_HOME/google_token.json" ] && echo "EXISTS ($(wc -c < "$HERMES_HOME/google_token.json") bytes)" || echo "MISSING")"
+echo "[entrypoint] google_client_secret.json: $([ -f "$HERMES_HOME/google_client_secret.json" ] && echo "EXISTS" || echo "MISSING")"
 
 # Debug: verify env vars are visible
 echo "[entrypoint] DISCORD_ALLOWED_USERS=${DISCORD_ALLOWED_USERS:-EMPTY}"

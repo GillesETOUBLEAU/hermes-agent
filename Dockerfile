@@ -50,7 +50,8 @@ RUN cd web && npm run build
 RUN chown hermes:hermes /opt/hermes
 USER hermes
 RUN uv venv && \
-    uv pip install --no-cache-dir -e ".[all]"
+    uv pip install --no-cache-dir -e ".[all]" && \
+    uv pip install --no-cache-dir google-api-python-client google-auth-oauthlib google-auth-httplib2
 
 # ---------- Runtime ----------
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
