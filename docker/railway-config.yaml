@@ -4,7 +4,7 @@
 # injected by Railway and loaded from the container's .env file.
 
 model:
-  default: "claude-haiku-4-5"
+  default: "claude-sonnet-4-6"
   provider: "anthropic"
 
 gateway:
