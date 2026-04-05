@@ -4,8 +4,8 @@
 # injected by Railway and loaded from the container's .env file.
 
 model:
-  default: "claude-sonnet-4-6"
-  provider: "anthropic"
+  default: "qwen/qwen3-235b-a22b"
+  provider: "openrouter"
 
 gateway:
   platforms:
