@@ -4,7 +4,7 @@
 # injected by Railway and loaded from the container's .env file.
 
 model:
-  default: "qwen/qwen3.6-plus"
+  default: "qwen/qwen3.6-plus:free"
   provider: "openrouter"
 
 gateway:
