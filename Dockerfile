@@ -56,5 +56,6 @@ RUN uv venv && \
 # ---------- Runtime ----------
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 ENV HERMES_HOME=/opt/data
-VOLUME [ "/opt/data" ]
+# VOLUME directive removed: Railway bans it. Configure a Railway volume
+# mounted at /opt/data via the Railway dashboard instead.
 ENTRYPOINT [ "/opt/hermes/docker/entrypoint.sh" ]
