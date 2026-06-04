@@ -133,6 +133,11 @@ COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 ENV npm_config_install_links=false
 
 # Also install the Google Workspace CLI globally for the gws-cli skill.
+# DL3016 (pin npm versions) intentionally not applied: we want the latest
+# @googleworkspace/cli, refreshed via the periodic base-image rebuild — same
+# rationale as the DL3008 apt ignore in .hadolint.yaml. The unscoped
+# `npm install` below reads pinned versions from package-lock.json regardless.
+# hadolint ignore=DL3016
 RUN npm install --prefer-offline --no-audit && \
     npm install -g @googleworkspace/cli && \
     npx playwright install --with-deps chromium --only-shell && \
