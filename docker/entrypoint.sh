@@ -73,6 +73,15 @@ if [ "$(id -u)" = "0" ]; then
 fi
 
 # --- Running as hermes from here ---
+# HOME is inherited as /root from the container's root start context, but we
+# now run as the unprivileged hermes user, which cannot write under /root.
+# Several runtime paths resolve via $HOME — notably the gateway platform locks
+# at $XDG_STATE_HOME/hermes/gateway-locks, defaulting to ~/.local/state
+# (see gateway/status.py). Point HOME at the writable, persistent data dir so
+# those paths land on the volume. Mirrors upstream's s6 main-wrapper.sh, which
+# does `export HOME=/opt/data` for exactly this reason (PR #33481).
+export HOME="${HERMES_HOME}"
+
 source "${INSTALL_DIR}/.venv/bin/activate"
 
 # Create essential directory structure.  Cache and platform directories
