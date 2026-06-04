@@ -5,10 +5,16 @@ set -e
 HERMES_HOME="${HERMES_HOME:-/opt/data}"
 INSTALL_DIR="/opt/hermes"
 
-# --- Privilege dropping via gosu ---
+# --- Privilege dropping via s6-setuidgid ---
 # When started as root (the default for Docker, or fakeroot in rootless Podman),
 # optionally remap the hermes user/group to match host-side ownership, fix volume
 # permissions, then re-exec as hermes.
+#
+# Upstream's s6-overlay migration removed gosu from the image; the supervised
+# boot path drops privileges with s6-setuidgid instead. This script runs as
+# Railway's startCommand (invoked directly, outside s6's `with-contenv` PATH),
+# so resolve the binary explicitly: it lives at /command/s6-setuidgid in the
+# s6-overlay v3 layout and may not be on the default PATH here.
 if [ "$(id -u)" = "0" ]; then
     if [ -n "$HERMES_UID" ] && [ "$HERMES_UID" != "$(id -u hermes)" ]; then
         echo "Changing hermes UID to $HERMES_UID"
@@ -47,7 +53,7 @@ if [ "$(id -u)" = "0" ]; then
 
     # Ensure config.yaml is readable by the hermes runtime user even if it was
     # edited on the host after initial ownership setup. Must run here (as root)
-    # rather than after the gosu drop, otherwise a non-root caller like
+    # rather than after the privilege drop, otherwise a non-root caller like
     # `docker run -u $(id -u):$(id -g)` hits "Operation not permitted" (#15865).
     if [ -f "$HERMES_HOME/config.yaml" ]; then
         chown hermes:hermes "$HERMES_HOME/config.yaml" 2>/dev/null || true
@@ -55,7 +61,15 @@ if [ "$(id -u)" = "0" ]; then
     fi
 
     echo "Dropping root privileges"
-    exec gosu hermes "$0" "$@"
+    # Prefer s6-setuidgid (shipped by the s6-overlay image); fall back to its
+    # canonical /command path if PATH doesn't include the s6 symlink dir.
+    setuidgid="$(command -v s6-setuidgid || true)"
+    [ -z "$setuidgid" ] && [ -x /command/s6-setuidgid ] && setuidgid=/command/s6-setuidgid
+    if [ -n "$setuidgid" ]; then
+        exec "$setuidgid" hermes "$0" "$@"
+    fi
+    # Last-resort fallback if s6-setuidgid is somehow unavailable.
+    exec su hermes -c "$(printf '%q ' "$0" "$@")"
 fi
 
 # --- Running as hermes from here ---
