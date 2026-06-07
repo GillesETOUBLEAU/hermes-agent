@@ -179,11 +179,36 @@ echo "[entrypoint] --- end .env ---"
 
 # Optionally start `hermes dashboard` as a side-process.
 #
+# This is what the Hermes Desktop app connects to as a "Remote gateway"
+# (Settings > Gateway): it serves the same REST + WebSocket API the desktop
+# shell speaks, so a long-running agent can stay here on Railway while you
+# chat from a native window.
+#
 # Toggled by HERMES_DASHBOARD=1 (also accepts "true"/"yes", case-insensitive).
 # Host/port/TUI can be overridden via:
 #   HERMES_DASHBOARD_HOST  (default 0.0.0.0 — exposed outside the container)
-#   HERMES_DASHBOARD_PORT  (default 9119, matches `hermes dashboard` default)
+#   HERMES_DASHBOARD_PORT  (default: Railway's $PORT when set, else 9119 —
+#                           binding to $PORT lets the generated
+#                           *.up.railway.app domain route to the dashboard
+#                           without a manual target-port setting)
 #   HERMES_DASHBOARD_TUI   (already honored by `hermes dashboard` itself)
+#
+# Auth posture on a non-loopback bind — REQUIRED before exposing this on a
+# public URL, because the dashboard surfaces your API keys (/api/env,
+# /api/config). The dashboard's OAuth gate engages on a non-loopback bind
+# *unless* --insecure is passed; we pick the gate from what's configured,
+# in priority order:
+#   1. HERMES_DASHBOARD_OAUTH_CLIENT_ID set  -> Nous Portal OAuth gate.
+#      The recommended path: "Sign in with Nous Research" from the Desktop
+#      app. Register the client once with `hermes dashboard register` or via
+#      the Portal /local-dashboards page; the value has shape agent:{id}.
+#   2. HERMES_DASHBOARD_BASIC_AUTH_USERNAME (+ _PASSWORD or _PASSWORD_HASH)
+#      set -> username/password gate. Keep behind a VPN; not for a public URL.
+#   3. HERMES_DASHBOARD_INSECURE truthy      -> legacy --insecure escape hatch
+#      (NO auth gate; protected only by the static session token). Opt-in.
+#   4. none of the above                     -> do NOT start the dashboard;
+#      print how to configure it. Fail-safe: never expose an unauthenticated
+#      dashboard, and never crash-loop the (foreground) gateway.
 #
 # The dashboard is a long-lived server.  We background it *before* the final
 # `exec hermes "$@"` so the user's chosen foreground command (chat, gateway,
@@ -193,22 +218,55 @@ echo "[entrypoint] --- end .env ---"
 case "${HERMES_DASHBOARD:-}" in
     1|true|TRUE|True|yes|YES|Yes)
         dash_host="${HERMES_DASHBOARD_HOST:-0.0.0.0}"
-        dash_port="${HERMES_DASHBOARD_PORT:-9119}"
+        dash_port="${HERMES_DASHBOARD_PORT:-${PORT:-9119}}"
         dash_args=(--host "$dash_host" --port "$dash_port" --no-open)
-        # Binding to anything other than localhost requires --insecure — the
-        # dashboard refuses otherwise because it exposes API keys.  Inside a
-        # container this is the expected deployment (host reaches it via
-        # published port), so opt in automatically.
+
+        dash_start=1
         if [ "$dash_host" != "127.0.0.1" ] && [ "$dash_host" != "localhost" ]; then
-            dash_args+=(--insecure)
+            # Non-loopback bind: pick an auth posture (see comment above).
+            if [ -n "${HERMES_DASHBOARD_OAUTH_CLIENT_ID:-}" ]; then
+                # Behind Railway's TLS-terminating proxy the OAuth redirect_uri
+                # must be the public https URL.  Derive it from Railway's
+                # public domain when the operator hasn't set it explicitly.
+                if [ -z "${HERMES_DASHBOARD_PUBLIC_URL:-}" ] && [ -n "${RAILWAY_PUBLIC_DOMAIN:-}" ]; then
+                    export HERMES_DASHBOARD_PUBLIC_URL="https://${RAILWAY_PUBLIC_DOMAIN}"
+                fi
+                echo "[entrypoint] dashboard: Nous Portal OAuth gate ENGAGED (client ${HERMES_DASHBOARD_OAUTH_CLIENT_ID})"
+                echo "[entrypoint] dashboard: public URL = ${HERMES_DASHBOARD_PUBLIC_URL:-<derived from forwarded headers>}"
+            elif [ -n "${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-}" ] && \
+                 { [ -n "${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}" ] || [ -n "${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH:-}" ]; }; then
+                echo "[entrypoint] dashboard: username/password gate ENGAGED (user ${HERMES_DASHBOARD_BASIC_AUTH_USERNAME})"
+            else
+                case "${HERMES_DASHBOARD_INSECURE:-}" in
+                    1|true|TRUE|True|yes|YES|Yes)
+                        dash_args+=(--insecure)
+                        echo "[entrypoint] WARNING: dashboard starting with --insecure — NO auth gate." >&2
+                        echo "[entrypoint]          Anyone who reaches ${dash_host}:${dash_port} with the session" >&2
+                        echo "[entrypoint]          token can read your API keys.  Prefer OAuth: set" >&2
+                        echo "[entrypoint]          HERMES_DASHBOARD_OAUTH_CLIENT_ID (see .env.railway)." >&2
+                        ;;
+                    *)
+                        dash_start=0
+                        echo "[entrypoint] dashboard NOT started: a non-loopback bind ($dash_host) needs an auth gate." >&2
+                        echo "[entrypoint]   Recommended: set HERMES_DASHBOARD_OAUTH_CLIENT_ID (agent:{id} from" >&2
+                        echo "[entrypoint]   'hermes dashboard register' or the Portal /local-dashboards page)." >&2
+                        echo "[entrypoint]   Or set HERMES_DASHBOARD_BASIC_AUTH_USERNAME + _PASSWORD for a password." >&2
+                        echo "[entrypoint]   Or set HERMES_DASHBOARD_INSECURE=1 to opt into the token-only escape" >&2
+                        echo "[entrypoint]   hatch (NOT recommended on a public URL)." >&2
+                        ;;
+                esac
+            fi
         fi
-        echo "Starting hermes dashboard on ${dash_host}:${dash_port} (background)"
-        # Prefix dashboard output so it's distinguishable from the main
-        # process in `docker logs`.  stdbuf keeps the pipe line-buffered.
-        (
-            stdbuf -oL -eL hermes dashboard "${dash_args[@]}" 2>&1 \
-                | sed -u 's/^/[dashboard] /'
-        ) &
+
+        if [ "$dash_start" = "1" ]; then
+            echo "Starting hermes dashboard on ${dash_host}:${dash_port} (background)"
+            # Prefix dashboard output so it's distinguishable from the main
+            # process in `docker logs`.  stdbuf keeps the pipe line-buffered.
+            (
+                stdbuf -oL -eL hermes dashboard "${dash_args[@]}" 2>&1 \
+                    | sed -u 's/^/[dashboard] /'
+            ) &
+        fi
         ;;
 esac
 
