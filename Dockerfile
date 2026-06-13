@@ -26,9 +26,19 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 # replaces tini with s6-overlay's /init (PID 1 = s6-svscan), which reaps
 # zombies non-blockingly on SIGCHLD and additionally supervises the main
 # hermes process, the dashboard, and per-profile gateways.
+# tesseract-ocr + language data (eng/fra) and poppler-utils power the
+# lightweight OCR path of the ocr-and-documents skill (pytesseract +
+# pdf2image). They MUST be baked here: the runtime drops to the non-root
+# `hermes` user (UID 10000, see below), so `apt-get` at runtime always
+# fails with EACCES — and a downloaded static binary would land in an
+# ephemeral image layer / the /opt/data volume and be lost on the next
+# redeploy. Adding them at build time (root) is the only durable install.
+# To support more OCR languages, append more `tesseract-ocr-<lang>` packs
+# (each ~a few MB); see `tesseract --list-langs` at runtime.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc python3-dev python3-venv libffi-dev libolm-dev procps git openssh-client docker-cli xz-utils && \
+    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc python3-dev python3-venv libffi-dev libolm-dev procps git openssh-client docker-cli xz-utils \
+    tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra poppler-utils && \
     rm -rf /var/lib/apt/lists/*
 
 # ---------- s6-overlay install ----------
@@ -178,6 +188,21 @@ RUN npm install --prefer-offline --no-audit && \
 COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
 RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra anthropic --extra bedrock --extra azure-identity --extra hindsight
+
+# ---------- OCR / document-extraction deps (ocr-and-documents skill) ----------
+# These are normally lazy-installed by the skill at first use, but a runtime
+# `pip install` lands in the venv inside the (immutable) image layer and is
+# lost on every container recreate / image update — same trap as the
+# hindsight-client note below. Baking them here makes OCR durable across
+# redeploys. Kept deliberately lightweight: pytesseract + pillow + pdf2image
+# drive the tesseract engine installed in the apt layer above (~150MB total);
+# pymupdf/pymupdf4llm cover text-based PDFs. We intentionally do NOT bake
+# marker-pdf — it pulls ~5GB of PyTorch + models and re-downloads ~2.5GB of
+# weights on first use, which is impractical for the Railway image. Install it
+# at runtime only if a document genuinely needs ML-grade layout/equation OCR.
+# The chmod/chown pass below makes the venv hermes-writable, so these
+# root-installed packages get the right ownership.
+RUN uv pip install --no-cache-dir pytesseract pillow pdf2image pymupdf pymupdf4llm
 
 # ---------- Source code ----------
 # .dockerignore excludes node_modules, so the installs above survive.
