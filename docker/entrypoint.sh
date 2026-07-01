@@ -252,6 +252,27 @@ elif [ -f "$HERMES_HOME/google_token.json" ]; then
     fi
 fi
 
+# Firebase — service-account auth for the Firebase CLI (deploys + hosting preview
+# channels). The default profile already deploys CRON reports via a service
+# account at $HERMES_HOME/firebase-service-account.json; export
+# GOOGLE_APPLICATION_CREDENTIALS so `firebase` authenticates non-interactively
+# for ALL profiles (incl. web-dev) without a per-command prefix. For durability
+# across a volume reset, optionally seed the key from FIREBASE_SERVICE_ACCOUNT_B64
+# (base64 of the JSON) in the Railway dashboard — generate with:
+#   cat ~/.hermes/firebase-service-account.json | base64 | tr -d '\n'
+FIREBASE_SA="$HERMES_HOME/firebase-service-account.json"
+if [ -n "$FIREBASE_SERVICE_ACCOUNT_B64" ]; then
+    echo "$FIREBASE_SERVICE_ACCOUNT_B64" | base64 -d > "$FIREBASE_SA"
+    chmod 600 "$FIREBASE_SA"
+    echo "[entrypoint] Firebase: decoded service account → $FIREBASE_SA"
+fi
+if [ -f "$FIREBASE_SA" ]; then
+    export GOOGLE_APPLICATION_CREDENTIALS="$FIREBASE_SA"
+    echo "[entrypoint] Firebase: GOOGLE_APPLICATION_CREDENTIALS → $FIREBASE_SA"
+else
+    echo "[entrypoint] Firebase: no service account (set FIREBASE_SERVICE_ACCOUNT_B64 to enable)"
+fi
+
 # Debug: verify Google OAuth files exist
 echo "[entrypoint] google_token.json: $([ -f "$HERMES_HOME/google_token.json" ] && echo "EXISTS ($(wc -c < "$HERMES_HOME/google_token.json") bytes)" || echo "MISSING")"
 echo "[entrypoint] google_client_secret.json: $([ -f "$HERMES_HOME/google_client_secret.json" ] && echo "EXISTS" || echo "MISSING")"
