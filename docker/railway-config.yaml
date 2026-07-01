@@ -16,3 +16,17 @@ terminal:
 
 compression:
   enabled: true
+
+# Kanban multi-agent coordination. This (default) profile runs the foreground
+# gateway on Railway, so it hosts the dispatcher that claims tasks and spawns
+# workers (`hermes -p <assignee> chat -q "work kanban task <id>"`) into the
+# web-design / web-dev profiles. The board is shared at <root>/kanban.db across
+# all profiles (see hermes_cli/kanban_db.py: kanban_home).
+kanban:
+  dispatch_in_gateway: true
+
+# Enables the Kanban orchestrator tool surface (kanban_create/list/unblock) so
+# this profile can create and assign cross-profile tasks. The gate reads this
+# top-level toolset list (tools/kanban_tools.py: _profile_has_kanban_toolset).
+toolsets:
+  - kanban

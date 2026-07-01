@@ -113,6 +113,44 @@ if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
     cp "$INSTALL_DIR/docker/SOUL.md" "$HERMES_HOME/SOUL.md"
 fi
 
+# --- Named profiles: seed dedicated agents on the volume (idempotent) --------
+# "web-design" and "web-dev" are full Hermes profiles living under
+# $HERMES_HOME/profiles/<name>/. The dashboard (which the Desktop app connects
+# to) is machine-level with a global profile switcher, so simply creating these
+# on the volume surfaces them as separate agents — no extra gateway/token.
+#
+# Created once via the official `hermes profile create` path so the structure is
+# valid (profile.yaml, skills, wrapper), then SOUL.md/config.yaml are overlaid
+# from the committed templates under docker/profiles/<name>/. On Railway the
+# config.yaml is always refreshed (mirrors the default-profile behavior above)
+# to keep connectors + the kanban toolset in sync; SOUL.md is only seeded when
+# absent so manual edits survive reboots. The shared kanban board at
+# $HERMES_HOME/kanban.db lets the profiles delegate work to each other.
+for _p in web-design web-dev; do
+    _pdir="$HERMES_HOME/profiles/$_p"
+    _tmpl="$INSTALL_DIR/docker/profiles/$_p"
+    if [ ! -d "$_pdir" ]; then
+        if [ "$_p" = "web-design" ]; then
+            _desc="Design & intégration web (maquettes, UI, responsive)"
+        else
+            _desc="Dev full-stack web — GitHub, Supabase, Netlify"
+        fi
+        echo "[entrypoint] creating profile: $_p"
+        hermes profile create "$_p" --description "$_desc" \
+            || echo "[entrypoint] WARNING: 'hermes profile create $_p' failed"
+    fi
+    # Overlay templates only if the profile dir exists (create may have failed);
+    # guard so a missing dir never aborts boot under `set -e`.
+    if [ -d "$_pdir" ]; then
+        if [ ! -f "$_pdir/SOUL.md" ] && [ -f "$_tmpl/SOUL.md" ]; then
+            cp "$_tmpl/SOUL.md" "$_pdir/SOUL.md" || true
+        fi
+        if [ -f "$_tmpl/config.yaml" ] && { [ -n "$RAILWAY_ENVIRONMENT" ] || [ ! -f "$_pdir/config.yaml" ]; }; then
+            cp "$_tmpl/config.yaml" "$_pdir/config.yaml" || true
+        fi
+    fi
+done
+
 # auth.json: bootstrap from env on first boot only.  Used by orchestrators
 # (e.g. provisioning a Hermes VPS from an account-management service) that
 # need to seed the OAuth refresh credential non-interactively, instead of

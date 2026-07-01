@@ -145,14 +145,15 @@ COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 # guards against a future regression if the source npm version changes.
 ENV npm_config_install_links=false
 
-# Also install the Google Workspace CLI globally for the gws-cli skill.
+# Also install the Google Workspace CLI (gws-cli skill) and the Netlify CLI
+# (used by the web-dev profile for deploys) globally.
 # DL3016 (pin npm versions) intentionally not applied: we want the latest
-# @googleworkspace/cli, refreshed via the periodic base-image rebuild — same
+# @googleworkspace/cli + netlify-cli, refreshed via the periodic base-image rebuild — same
 # rationale as the DL3008 apt ignore in .hadolint.yaml. The unscoped
 # `npm install` below reads pinned versions from package-lock.json regardless.
 # hadolint ignore=DL3016
 RUN npm install --prefer-offline --no-audit && \
-    npm install -g @googleworkspace/cli && \
+    npm install -g @googleworkspace/cli netlify-cli && \
     npx playwright install --with-deps chromium --only-shell && \
     npm cache clean --force
 

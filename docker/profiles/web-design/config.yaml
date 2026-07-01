@@ -1,0 +1,17 @@
+# Profil Web Design — WMH Project
+# Persona : SOUL.md (design & intégration web, fidélité maquette, mobile-first).
+# Aucun connecteur MCP requis. Amorcé sur le volume par docker/entrypoint.sh.
+
+model:
+  default: "qwen/qwen3.6-plus"
+  provider: "openrouter"
+
+terminal:
+  backend: local
+
+# Coordination multi-agents. La porte Kanban lit ce toolset top-level
+# (tools/kanban_tools.py: _profile_has_kanban_toolset). Permet à ce profil de
+# créer/assigner des tâches et d'agir comme worker sur le board partagé
+# (<root>/kanban.db, commun aux profils).
+toolsets:
+  - kanban
