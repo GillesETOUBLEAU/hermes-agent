@@ -84,6 +84,14 @@ export HOME="${HERMES_HOME}"
 
 source "${INSTALL_DIR}/.venv/bin/activate"
 
+# Let the GitHub CLI (gh) authenticate non-interactively from the same PAT the
+# GitHub MCP connector uses. gh reads GH_TOKEN/GITHUB_TOKEN, not
+# GITHUB_PERSONAL_ACCESS_TOKEN, so bridge it here (only when unset). Inherited by
+# the gateway/dashboard and every profile agent they spawn.
+if [ -n "$GITHUB_PERSONAL_ACCESS_TOKEN" ] && [ -z "$GH_TOKEN" ] && [ -z "$GITHUB_TOKEN" ]; then
+    export GH_TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN"
+fi
+
 # Create essential directory structure.  Cache and platform directories
 # (cache/images, cache/audio, platforms/whatsapp, etc.) are created on
 # demand by the application — don't pre-create them here so new installs

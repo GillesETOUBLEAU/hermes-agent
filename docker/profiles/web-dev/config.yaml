@@ -15,6 +15,16 @@ terminal:
 toolsets:
   - kanban
 
+# Autonomie non-supervisée : un assesseur LLM évalue et auto-approuve/refuse les
+# commandes dangereuses + execute_code, au lieu de bloquer en attente d'une
+# validation humaine en chat (défaut approvals.mode=manual, cf. #30882). Sans ça,
+# netlify/git/build restent bloqués. provider "auto" => OpenRouter (gemini-flash,
+# rapide/économe) via OPENROUTER_API_KEY.
+auxiliary:
+  approval:
+    provider: "auto"
+    model: ""
+
 mcp_servers:
   # GitHub — serveur MCP officiel hébergé, auth par PAT en Bearer.
   # (https://github.com/github/github-mcp-server)

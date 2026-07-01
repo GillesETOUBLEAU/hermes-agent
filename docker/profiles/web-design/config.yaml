@@ -15,3 +15,11 @@ terminal:
 # (<root>/kanban.db, commun aux profils).
 toolsets:
   - kanban
+
+# Autonomie non-supervisée : assesseur LLM pour auto-approuver/refuser les
+# commandes dangereuses au lieu de bloquer en attente d'une validation humaine
+# (défaut approvals.mode=manual, cf. #30882). provider "auto" => OpenRouter.
+auxiliary:
+  approval:
+    provider: "auto"
+    model: ""
