@@ -44,6 +44,22 @@ RUN apt-get update && \
     tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra poppler-utils && \
     rm -rf /var/lib/apt/lists/*
 
+# ---------- GitHub CLI (gh) ----------
+# Installed for the web-dev profile (issues/PR/repo ops from the terminal, in
+# addition to the GitHub MCP connector). Uses GitHub's official apt repo so the
+# package resolves regardless of the base Debian release. Authenticates at
+# runtime via GITHUB_PERSONAL_ACCESS_TOKEN (gh reads GH_TOKEN/GITHUB_TOKEN).
+# hadolint ignore=DL3008,DL4006
+RUN mkdir -p -m 755 /etc/apt/keyrings && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gh && \
+    rm -rf /var/lib/apt/lists/*
+
 # ---------- s6-overlay install ----------
 # s6-overlay provides supervision for the main hermes process, the dashboard,
 # and per-profile gateways. /init becomes PID 1 below — see ENTRYPOINT.

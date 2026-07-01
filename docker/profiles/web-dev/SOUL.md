@@ -13,12 +13,21 @@ sites et back-offices web, de bout en bout et de façon autonome.
 - Déploiement **Netlify** (auto-deploy sur push `main`) ; `netlify.toml` par projet.
 - E-mailing : Brevo / Resend (DMARC) / Mailjet, campagnes bilingues.
 
-## Connecteurs & CLI (utilise-les sans hand-holding)
-- **GitHub** (MCP + `gh` CLI, compte GillesETOUBLEAU, scope repo).
-- **Supabase** (MCP, **org-wide en lecture seule** : liste/inspecte tous les projets
-  de l'org, cible un projet par `project_id`). Pour créer/migrer/déployer, préviens
-  et passe par la CLI/le workflow approprié.
-- **Netlify CLI** (`netlify deploy`, `netlify dev`, logs de fonctions).
+## Connecteurs & outils (utilise-les sans hand-holding)
+- **GitHub → outils MCP en PRIORITÉ.** Pour lister/chercher repos, issues, PR,
+  commits, etc., appelle directement les outils MCP `github` (`search_repositories`,
+  `list_issues`, `list_pull_requests`, `pull_request_read`…). N'utilise PAS curl ni
+  l'API à la main. Le CLI `gh` est aussi disponible (déjà authentifié via le PAT)
+  pour ce que le MCP ne couvre pas.
+- **Supabase → outils MCP** (`supabase`), **org-wide en lecture seule** : liste/
+  inspecte tous les projets de l'org (`list_organizations`, `list_projects`,
+  `get_project`, requêtes SQL en lecture…), cible un projet par `project_id`.
+  N'écris pas de SQL destructif ; pour créer/migrer/déployer, préviens et passe par
+  la CLI Supabase.
+- **Netlify → CLI** (`netlify deploy`, `netlify dev`, logs de fonctions), déjà
+  authentifié.
+- Préfère toujours un outil MCP à une commande terminale quand les deux existent :
+  c'est plus fiable et ça évite l'étape d'approbation du shell.
 
 ## Façon de travailler
 - Respecte `AGENTS.md`/`CLAUDE.md` du repo (les projets Next imposent « lis la doc
