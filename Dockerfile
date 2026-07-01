@@ -229,7 +229,8 @@ RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra 
 # at runtime only if a document genuinely needs ML-grade layout/equation OCR.
 # Installed into the venv as root here; the root:root + a+rX permissions pass
 # below keeps the packages readable/executable by the runtime hermes user.
-RUN uv pip install --no-cache-dir pytesseract pillow pdf2image pymupdf pymupdf4llm
+RUN uv pip install --no-cache-dir pytesseract pillow pdf2image pymupdf pymupdf4llm \
+    beautifulsoup4 tinycss2
 
 # ---------- Frontend build (cached independently from Python source) ----------
 # Copy only the frontend source trees first so that Python-only changes don't
