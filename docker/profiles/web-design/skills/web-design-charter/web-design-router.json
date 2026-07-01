@@ -1,0 +1,45 @@
+{
+  "agent": "hermes",
+  "sub_agent": "web-design",
+  "trigger": {
+    "discord_command": "!design",
+    "intents": ["extract", "build", "analyze", "critique"],
+    "allowlist": "owner_id_only"
+  },
+  "default_workflow": "extract_then_build",
+  "model_routing": {
+    "orchestrator": {
+      "model": "qwen3.6-plus",
+      "provider": "openrouter",
+      "role": "intent parsing, dispatch, state management (/data)"
+    },
+    "design_subagent": {
+      "model": "anthropic/claude-opus-4-8",
+      "provider": "openrouter",
+      "fallback_model": "google/gemini-3.1-pro",
+      "reason": "jugement esthétique + vision — qwen3.6-plus non validé sur ce use case, ne pas retirer ce routing sans A/B test préalable"
+    }
+  },
+  "tools_required": [
+    { "name": "extract_web_design_script", "status": "livré, testé sur mozilla.org — scripts/extract_web_design.py, aucune dépendance navigateur" },
+    { "name": "playwright_screenshot", "status": "déjà en prod (MSC newsletter automation) — requis uniquement pour QA visuelle et fallback sites JS-heavy" },
+    { "name": "figma_rest_api", "status": "à provisionner — personal access token, pas de MCP côté Hermes" },
+    { "name": "ovh_object_storage_write", "status": "bucket dédié à créer, ex: web-design-refs" },
+    { "name": "axe_core_playwright", "status": "à ajouter aux deps du conteneur" }
+  ],
+  "knowledge_base_path": "/data/knowledge/web-design/",
+  "knowledge_files": [
+    "web-design-extractor.md",
+    "design-principles.md",
+    "a11y-checklist.md",
+    "design-systems-reference.md",
+    "wmh-brand.md"
+  ],
+  "pipeline": {
+    "extract": "extract_web_design_script(url|figma_key|pdf) -> CHARTE.md + design-tokens.json -> réponse Discord (validation humaine avant build)",
+    "build": "charte client existante (priorité) OU wmh-brand.md (si demande explicite interne WMH) -> design_subagent(brief, tokens, knowledge_base) -> code scaffold -> axe_core_playwright(scan) -> si violations critiques: retry -> push OVH Object Storage / repo",
+    "analyze": "playwright_screenshot(url) -> design_subagent(critique, knowledge_base) -> réponse Discord",
+    "critique": "figma_rest_api(get_file) ou upload direct -> design_subagent(analyse forensique) -> réponse Discord"
+  }
+}
+

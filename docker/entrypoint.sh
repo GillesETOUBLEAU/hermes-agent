@@ -166,6 +166,20 @@ for _p in web-design web-dev; do
             rm -rf "$_pdir/skills/productivity/google-workspace"
             cp -a "$_gwsk" "$_pdir/skills/productivity/google-workspace" 2>/dev/null || true
         fi
+        # Seed profile-specific skills committed under docker/profiles/<p>/skills/
+        # (e.g. web-design-charter) into the profile. Refresh on Railway, else
+        # seed when missing, so profiles pick up updates on redeploy.
+        if [ -d "$_tmpl/skills" ]; then
+            for _sk in "$_tmpl"/skills/*/; do
+                [ -d "$_sk" ] || continue
+                _skname=$(basename "$_sk")
+                if [ -n "$RAILWAY_ENVIRONMENT" ] || [ ! -d "$_pdir/skills/$_skname" ]; then
+                    mkdir -p "$_pdir/skills"
+                    rm -rf "$_pdir/skills/$_skname"
+                    cp -a "$_sk" "$_pdir/skills/$_skname" 2>/dev/null || true
+                fi
+            done
+        fi
     fi
 done
 

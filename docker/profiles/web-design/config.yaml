@@ -2,8 +2,10 @@
 # Persona : SOUL.md (design & intégration web, fidélité maquette, mobile-first).
 # Aucun connecteur MCP requis. Amorcé sur le volume par docker/entrypoint.sh.
 
+# Gemini 3.1 Pro pour le jugement esthétique/vision (le bundle web-design-charter
+# déconseille qwen, non validé sur ce use case). Via OpenRouter.
 model:
-  default: "qwen/qwen3.6-plus"
+  default: "google/gemini-3.1-pro"
   provider: "openrouter"
 
 terminal:
