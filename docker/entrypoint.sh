@@ -156,6 +156,16 @@ for _p in web-design web-dev; do
         if [ -f "$_tmpl/config.yaml" ] && { [ -n "$RAILWAY_ENVIRONMENT" ] || [ ! -f "$_pdir/config.yaml" ]; }; then
             cp "$_tmpl/config.yaml" "$_pdir/config.yaml" || true
         fi
+        # Refresh the google-workspace skill from the bundled (fixed) copy. The
+        # version seeded at profile-create time routes through gws, which cannot
+        # parse Hermes' token format; the bundled copy now defaults to the Python
+        # google-api path that works. Refresh on Railway (or seed if missing).
+        _gwsk="$INSTALL_DIR/skills/productivity/google-workspace"
+        if [ -d "$_gwsk" ] && { [ -n "$RAILWAY_ENVIRONMENT" ] || [ ! -d "$_pdir/skills/productivity/google-workspace" ]; }; then
+            mkdir -p "$_pdir/skills/productivity"
+            rm -rf "$_pdir/skills/productivity/google-workspace"
+            cp -a "$_gwsk" "$_pdir/skills/productivity/google-workspace" 2>/dev/null || true
+        fi
     fi
 done
 
