@@ -193,6 +193,23 @@ if [ -n "$GOOGLE_CLIENT_SECRET_B64" ]; then
     echo "[entrypoint] Google OAuth: decoded client secret → $HERMES_HOME/google_client_secret.json"
 fi
 
+# Share Google credentials with the named profiles. The google-workspace skill
+# reads the token at get_hermes_home()/google_token.json, which for a profile is
+# profiles/<name>/google_token.json — so without this, web-dev/web-design cannot
+# access Google Workspace / Drive. Symlink (not copy) so the token the skill
+# refreshes and writes back stays a single shared file. GWS_CONFIG_DIR/gws CLI is
+# already shared via the exported GOOGLE_WORKSPACE_CLI_CONFIG_DIR below.
+if [ -f "$HERMES_HOME/google_token.json" ] && [ -d "$HERMES_HOME/profiles" ]; then
+    for _pd in "$HERMES_HOME"/profiles/*/; do
+        [ -d "$_pd" ] || continue
+        ln -sf "$HERMES_HOME/google_token.json" "${_pd}google_token.json" 2>/dev/null || true
+        if [ -f "$HERMES_HOME/google_client_secret.json" ]; then
+            ln -sf "$HERMES_HOME/google_client_secret.json" "${_pd}google_client_secret.json" 2>/dev/null || true
+        fi
+        echo "[entrypoint] Google OAuth: linked credentials into ${_pd}"
+    done
+fi
+
 # gws CLI — set up config directory and bridge credentials if available
 GWS_CONFIG_DIR="$HERMES_HOME/gws-config"
 mkdir -p "$GWS_CONFIG_DIR"
