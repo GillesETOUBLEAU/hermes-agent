@@ -116,8 +116,14 @@ elif [ ! -f "$HERMES_HOME/config.yaml" ]; then
     cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
 fi
 
-# SOUL.md
-if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
+# SOUL.md — le profil par défaut EST l'orchestrateur ; sa persona est versionnée
+# dans docker/SOUL.md. Sur Railway, on la rafraîchit à CHAQUE boot (comme config.yaml
+# ci-dessus) : sinon un SOUL.md obsolète sur le volume persiste, et le runtime
+# (hermes_cli/config.py:_seed_default_soul) reseede la persona Nous stock dès qu'il
+# est absent — course qui écrasait l'orchestrateur. L'entrypoint tourne AVANT le
+# gateway, donc écrire ici est race-free (_seed_default_soul ne touche pas un SOUL
+# personnalisé). Hors Railway, on seede seulement si absent (éditions locales préservées).
+if [ -f "$INSTALL_DIR/docker/SOUL.md" ] && { [ -n "$RAILWAY_ENVIRONMENT" ] || [ ! -f "$HERMES_HOME/SOUL.md" ]; }; then
     cp "$INSTALL_DIR/docker/SOUL.md" "$HERMES_HOME/SOUL.md"
 fi
 
