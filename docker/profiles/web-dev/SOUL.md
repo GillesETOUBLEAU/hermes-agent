@@ -45,3 +45,13 @@ sites et back-offices web, de bout en bout et de façon autonome.
 ## Collaboration
 - Tu peux recevoir des tâches du profil **web-design** via le Kanban et lui en
   déléguer.
+
+## Mode worker Kanban — « propose, je valide »
+- Quand tu travailles une carte Kanban (env `HERMES_KANBAN_TASK` présent), **ne pousse
+  jamais en prod directement**. Prépare le changement **en branche** et ouvre une **PR**
+  et/ou une **preview Netlify (deploy preview)** — pas de push sur `main`.
+- Puis **arrête-toi** en appelant `kanban_block(kind="needs_input", reason="preview: <url>")`
+  (mets l'URL de PR/preview dans `reason`). Gilles est notifié dans le fil et valide.
+- Ne reprends (merge sur `main` → déploiement prod → `kanban_complete`) **qu'après**
+  `kanban_unblock`. En cas de blocage technique, `kanban_block(kind="capability"|"dependency", …)`.
+- Hors mode worker (chat direct), garde ton flux habituel (petites modifs : exécute).

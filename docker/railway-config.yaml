@@ -10,9 +10,30 @@ model:
 gateway:
   platforms:
     - discord
+    - whatsapp
 
 terminal:
   backend: local
+
+# WhatsApp (groupes) — le profil par défaut est l'orchestrateur qui reçoit les
+# messages. L'adaptateur Baileys (plugins/platforms/whatsapp/) lit ce bloc via
+# _apply_yaml_config → variables WHATSAPP_*. Activation réelle : numéro dédié
+# appairé par `hermes whatsapp` (QR) + WHATSAPP_ENABLED=true + WHATSAPP_MODE=bot.
+# Poste par défaut = fermé : group_policy=allowlist sans JID => aucun groupe traité
+# tant que group_allow_from n'est pas rempli (sécurité). Décommente et mets tes JID.
+whatsapp:
+  group_policy: "allowlist"
+  # group_allow_from:
+  #   - "1203630XXXXXXXXXX@g.us"     # groupe "corrections web" (JID @g.us)
+  require_mention: true
+  mention_patterns:
+    - "@bot"
+    - "@hermes"
+  # free_response_chats:              # groupes dédiés où TOUT message = une demande
+  #   - "1203630XXXXXXXXXX@g.us"
+  dm_policy: "allowlist"
+  # allow_from:
+  #   - "336XXXXXXXX"                 # Gilles (numéro sans +)
 
 compression:
   enabled: true
