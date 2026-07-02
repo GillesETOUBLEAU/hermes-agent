@@ -10,7 +10,10 @@ model:
 gateway:
   platforms:
     - discord
-    - whatsapp
+    # - whatsapp   # EN PAUSE (2026-07-02). Réactiver = décommenter cette ligne
+    #              + WHATSAPP_ENABLED=true, idéalement sur un NUMÉRO DÉDIÉ en mode bot.
+    #              Note : la présence dans cette liste force le chargement de la
+    #              plateforme, même si WHATSAPP_ENABLED=false — d'où le commentaire ici.
 
 terminal:
   backend: local
