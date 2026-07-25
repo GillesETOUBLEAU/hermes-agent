@@ -33,7 +33,7 @@ whatsapp:
   group_allow_from:
     - "120363426647005883@g.us"      # Test Pippa
   require_mention: true
-  mention_pattern:
+  mention_patterns:
     - "@bot"
     - "@hermes"
     - "@pippa"                        # le bot s'appelle Pippa
@@ -46,8 +46,8 @@ whatsapp:
                                      # WhatsApp dans gateway/config.py). Sans ceci, tout DM est rejeté
                                      # en silence (le groupe marche car group_allow_from est rempli).
   allow_from:
-    - "33609152093"                  # Gilles — numero perso
-    - "159180145049752"              # Gilles — LID (forme reelle d'arrivee des DM WhatsApp)
+    - "33609152093"                  # Gilles — numéro perso
+    - "159180145049752"              # Gilles — LID (forme réelle d'arrivée des DM WhatsApp)
 
 compression:
   enabled: true
@@ -55,7 +55,7 @@ compression:
 # Voix Discord — ElevenLabs des deux côtés, une seule clé (ELEVENLABS_API_KEY,
 # var Railway). TTS : bulles vocales (/voice on|tts) + voice channels
 # (/voice join). STT : Scribe transcrit ce qui est dit dans le voice channel.
-# Sans le bloc stt, l'auto-sélection préfererait groq/openai si leurs clés
+# Sans le bloc stt, l'auto-sélection préférerait groq/openai si leurs clés
 # existent (tools/transcription_tools.py) — on pin donc explicitement.
 # eleven_multilingual_v2 gère le français ; voice_id = Adam (défaut), à
 # remplacer par une voix FR de la bibliothèque ElevenLabs si besoin.
