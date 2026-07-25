@@ -75,6 +75,15 @@ stt:
 # all profiles (see hermes_cli/kanban_db.py: kanban_home).
 kanban:
   dispatch_in_gateway: true
+  # Centralisation des notifications Kanban (25/07/2026) — TOUT arrive sur le
+  # DM WhatsApp direct de Gilles (chat id 159180145049752@lid). Les anciennes
+  # destinations (Discord 1467614563489812673 + groupe WhatsApp Test Pippa
+  # 120363426647005883@g.us) sont retirées : Gilles veut tout sur le DM.
+  # Lu par le monkeypatch kanban_always_notify_patch.py (usercustomize.py)
+  # qui appelle _kb.add_notify_sub sur chaque kanban_create.
+  always_notify:
+    - platform: "whatsapp"
+      chat_id: "159180145049752@lid"   # DM WhatsApp Gilles (LID)
 
 # Enables the Kanban orchestrator tool surface (kanban_create/list/unblock) so
 # this profile can create and assign cross-profile tasks. Le gate lit cette liste
