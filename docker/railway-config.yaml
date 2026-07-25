@@ -33,7 +33,7 @@ whatsapp:
   group_allow_from:
     - "120363426647005883@g.us"      # Test Pippa
   require_mention: true
-  mention_patterns:
+  mention_pattern:
     - "@bot"
     - "@hermes"
     - "@pippa"                        # le bot s'appelle Pippa
@@ -46,8 +46,8 @@ whatsapp:
                                      # WhatsApp dans gateway/config.py). Sans ceci, tout DM est rejeté
                                      # en silence (le groupe marche car group_allow_from est rempli).
   allow_from:
-    - "33609152093"                  # Gilles — numéro perso
-    - "159180145049752"              # Gilles — LID (forme réelle d'arrivée des DM WhatsApp)
+    - "33609152093"                  # Gilles — numero perso
+    - "159180145049752"              # Gilles — LID (forme reelle d'arrivee des DM WhatsApp)
 
 compression:
   enabled: true
@@ -55,7 +55,7 @@ compression:
 # Voix Discord — ElevenLabs des deux côtés, une seule clé (ELEVENLABS_API_KEY,
 # var Railway). TTS : bulles vocales (/voice on|tts) + voice channels
 # (/voice join). STT : Scribe transcrit ce qui est dit dans le voice channel.
-# Sans le bloc stt, l'auto-sélection préférerait groq/openai si leurs clés
+# Sans le bloc stt, l'auto-sélection préfererait groq/openai si leurs clés
 # existent (tools/transcription_tools.py) — on pin donc explicitement.
 # eleven_multilingual_v2 gère le français ; voice_id = Adam (défaut), à
 # remplacer par une voix FR de la bibliothèque ElevenLabs si besoin.
@@ -75,15 +75,18 @@ stt:
 # all profiles (see hermes_cli/kanban_db.py: kanban_home).
 kanban:
   dispatch_in_gateway: true
-  # Centralisation des notifications Kanban (25/07/2026) — TOUT arrive sur le
-  # DM WhatsApp direct de Gilles (chat id 159180145049752@lid). Les anciennes
-  # destinations (Discord 1467614563489812673 + groupe WhatsApp Test Pippa
-  # 120363426647005883@g.us) sont retirées : Gilles veut tout sur le DM.
+  # Notifications Kanban (25/07/2026) — ajout du DM WhatsApp direct de Gilles
+  # (chat id 159180145049752@lid) en parallèle du canal Discord existant
+  # (1467614563489812673) qui reste actif. Discord est conservé le temps de
+  # valider que le DM WhatsApp reçoit bien les notifications. Le groupe
+  # WhatsApp Test Pippa (120363426647005883@g.us) reste retiré.
   # Lu par le monkeypatch kanban_always_notify_patch.py (usercustomize.py)
   # qui appelle _kb.add_notify_sub sur chaque kanban_create.
   always_notify:
     - platform: "whatsapp"
-      chat_id: "159180145049752@lid"   # DM WhatsApp Gilles (LID)
+      chat_id: "159180145049752@lid"   # DM WhatsApp Gilles (LID) — NOUVEAU
+    - platform: "discord"
+      chat_id: "1467614563489812673"   # Discord — CONSERVÉ (canal qui fonctionne)
 
 # Enables the Kanban orchestrator tool surface (kanban_create/list/unblock) so
 # this profile can create and assign cross-profile tasks. Le gate lit cette liste
