@@ -8544,16 +8544,59 @@ _SECRET_CONFIG_KEYS = frozenset({
 })
 
 
+# Compound config keys where a secret keyword sits as a SUFFIX component
+# (preceded by at least one ``_`` / ``-`` namespace separator), e.g.
+# ``SUPABASE_ACCESS_TOKEN``, ``VIMEO_ACCESS_TOKEN``, ``DB_PASSWORD``,
+# ``WEBHOOK_SECRET``. These carry a real credential value but don't exactly
+# equal any ``_SECRET_CONFIG_KEYS`` entry. Suffix-only (not prefix, not
+# embedded) so benign names like ``token_count``, ``secret_santa``,
+# ``secretary``, ``tokenizer`` — where the keyword is a prefix or embedded
+# inside a larger word — are NOT matched. This preserves the existing
+# exact-match contract documented above while closing the ``mcp_servers.*.env``
+# leak (env tokens under MCP server blocks displayed verbatim by
+# ``hermes config get``).
+_SECRET_KEY_SUFFIX_RE = re.compile(
+    r"(?:[A-Za-z0-9]+[_-])+"
+    r"(?:api[_-]?key|token|secret|password|passwd|credential|auth|authorization|bearer|jwt|private[_-]?key)$",
+    re.IGNORECASE,
+)
+
+
+def _is_secret_config_key(key: str) -> bool:
+    """True if a config dict key names a credential whose value must be masked.
+
+    Two tiers:
+
+    1. Exact match (case-insensitive) against :data:`_SECRET_CONFIG_KEYS` —
+       the fast allowlist covering ``api_key``, ``token``, ``secret``, …
+    2. Suffix-component match against :data:`_SECRET_KEY_SUFFIX_RE` — catches
+       compound names like ``SUPABASE_ACCESS_TOKEN`` or ``DB_PASSWORD`` where
+       a secret keyword is the terminal ``<PREFIX>_<KEYWORD>`` component.
+       Prefix/embedded keywords (``token_count``, ``secret_santa``,
+       ``secretary``) do NOT match, preserving the existing benign-key
+       contract.
+
+    Used by :func:`redact_config_value` before printing any config sub-tree.
+    """
+    if not isinstance(key, str) or not key:
+        return False
+    if key.lower() in _SECRET_CONFIG_KEYS:
+        return True
+    return bool(_SECRET_KEY_SUFFIX_RE.match(key))
+
+
 def redact_config_value(value: Any, _depth: int = 0) -> Any:
     """Return a copy of ``value`` with credential-shaped keys masked for display.
 
-    Recursively walks dicts/lists and replaces the value of any key in
-    ``_SECRET_CONFIG_KEYS`` (case-insensitive) with a masked form via
-    :func:`agent.redact.mask_secret`. Non-secret keys and scalar values pass
-    through unchanged. Use this before ``print``-ing any config sub-tree that
-    might carry a custom-provider ``api_key`` — ``print`` bypasses the logging
-    redactor, and opaque tokens (e.g. Cloudflare ``cfut_...``) don't match the
-    vendor-prefix regexes either, so structural key-name masking is required.
+    Recursively walks dicts/lists and replaces the value of any key whose name
+    looks like a credential (exact match against ``_SECRET_CONFIG_KEYS`` OR
+    word-boundary keyword match via :func:`_is_secret_config_key`) with a
+    masked form via :func:`agent.redact.mask_secret`. Non-secret keys and scalar
+    values pass through unchanged. Use this before ``print``-ing any config
+    sub-tree that might carry a secret — ``print`` bypasses the logging redactor,
+    and opaque tokens (e.g. Cloudflare ``cfut_...``, Supabase ``sbp_...``) don't
+    match the vendor-prefix regexes either, so structural key-name masking is
+    required.
     """
     from agent.redact import mask_secret
 
@@ -8563,7 +8606,7 @@ def redact_config_value(value: Any, _depth: int = 0) -> Any:
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
-            if isinstance(k, str) and k.lower() in _SECRET_CONFIG_KEYS and isinstance(v, str) and v:
+            if isinstance(v, str) and v and _is_secret_config_key(k):
                 out[k] = mask_secret(v)
             else:
                 out[k] = redact_config_value(v, _depth + 1)
@@ -9178,7 +9221,17 @@ def set_config_value(key: str, value: str, force: bool = False):
 
 
 def get_config_value(key: str, *, as_json: bool = False):
-    """Print a resolved configuration value."""
+    """Print a resolved configuration value.
+
+    The value is run through :func:`redact_config_value` before formatting so
+    that any credential nested in the resolved sub-tree (e.g. a token under
+    ``mcp_servers.<srv>.env.<TOKEN_NAME>``) is masked for display. This is
+    necessary because ``print`` bypasses the logging redactor and many opaque
+    tokens (Supabase ``sbp_…``, bare hex strings, …) don't match any vendor
+    prefix regex, so only structural key-name masking catches them. Without
+    this, ``hermes config get mcp_servers`` leaked env secrets verbatim while
+    the same keys were correctly masked by ``hermes config show``.
+    """
     if _is_env_config_key(key):
         env_value = get_env_value(key.upper())
         value = _MISSING if env_value is None else env_value
@@ -9188,6 +9241,14 @@ def get_config_value(key: str, *, as_json: bool = False):
     if value is _MISSING:
         print(f"Config key not set: {key}", file=sys.stderr)
         sys.exit(1)
+
+    # Structural redaction: mask any credential-shaped key in dict/list trees.
+    # Scalar values pass through unchanged (a bare env var resolved via the
+    # _is_env_config_key branch above is already handled by the caller's own
+    # secret routing — get_config_value is the *display* surface, not the
+    # setter).
+    if isinstance(value, (dict, list)):
+        value = redact_config_value(value)
 
     print(_format_config_get_value(value, as_json=as_json))
 

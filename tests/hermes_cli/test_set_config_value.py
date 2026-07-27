@@ -465,6 +465,165 @@ class TestSecretRedactionInDisplay:
         captured = capsys.readouterr()
         assert "Set model.reasoning_effort = high" in captured.out
 
+    # --- compound key names (mcp_servers.*.env leak) ---
+
+    def test_redact_config_value_masks_compound_env_token(self):
+        """A compound key like SUPABASE_ACCESS_TOKEN (not in the exact-match
+        allowlist) must still be masked — it carries a real credential and
+        doesn't match any vendor-prefix regex, so only structural key-name
+        masking catches it. Reproduces the mcp_servers.*.env leak.
+        """
+        from hermes_cli.config import redact_config_value
+        secret = "test-fake-supabase-token-1234567890abcdef"
+        mcp = {
+            "supabase": {
+                "command": "npx",
+                "args": ["-y", "@supabase/mcp-server-supabase@latest"],
+                "env": {"SUPABASE_ACCESS_TOKEN": secret},
+                "enabled": True,
+            }
+        }
+
+        out = redact_config_value(mcp)
+
+        # Secret is masked.
+        assert out["supabase"]["env"]["SUPABASE_ACCESS_TOKEN"] != secret
+        assert secret not in str(out)
+        # Non-secret fields pass through unchanged.
+        assert out["supabase"]["command"] == "npx"
+        assert out["supabase"]["args"] == ["-y", "@supabase/mcp-server-supabase@latest"]
+        assert out["supabase"]["enabled"] is True
+
+    def test_redact_config_value_masks_bare_hex_env_token(self):
+        """A bare hex token with no vendor prefix (e.g. Vimeo) must be masked
+        by key name, not by value pattern.
+        """
+        from hermes_cli.config import redact_config_value
+        secret = "test-fake-vimeo-token-1234567890abcdef"
+        mcp = {"vimeo": {"env": {"VIMEO_ACCESS_TOKEN": secret}}}
+
+        out = redact_config_value(mcp)
+
+        assert out["vimeo"]["env"]["VIMEO_ACCESS_TOKEN"] != secret
+        assert secret not in str(out)
+
+    def test_redact_config_value_keeps_nonsecret_env_var(self):
+        """A non-secret env var (e.g. SUPABASE_URL) must stay readable — the
+        goal is debuggability without leakage, not blind masking of all env.
+        """
+        from hermes_cli.config import redact_config_value
+        cfg = {"supabase": {"env": {"SUPABASE_URL": "https://example.supabase.co"}}}
+
+        out = redact_config_value(cfg)
+
+        assert out["supabase"]["env"]["SUPABASE_URL"] == "https://example.supabase.co"
+
+    def test_redact_config_value_still_ignores_benign_compound_keys(self):
+        """The suffix-regex must NOT match benign keys where the secret keyword
+        is a prefix (token_count, secret_santa) or embedded (secretary).
+        """
+        from hermes_cli.config import redact_config_value
+        cfg = {
+            "token_count": 1234,
+            "secret_santa": "alice",
+            "secretary": "bob",
+            "tokenizer": "cl100k_base",
+            "max_turns": 90,
+        }
+
+        out = redact_config_value(cfg)
+
+        assert out == cfg
+
+
+# ---------------------------------------------------------------------------
+# `hermes config get` secret masking (mcp_servers.*.env leak)
+# ---------------------------------------------------------------------------
+
+class TestConfigGetSecretMasking:
+    """``hermes config get <key>`` must mask secrets in dict/list output.
+
+    Before the fix, ``get_config_value`` printed the resolved value directly
+    via ``_format_config_get_value`` without running it through
+    ``redact_config_value``. Opaque tokens (Supabase ``sbp_…``, bare hex)
+    that don't match any vendor-prefix regex leaked verbatim, while the same
+    keys were correctly masked by ``hermes config show``.
+    """
+
+    def _write_mcp_config(self, tmp_path):
+        """Write a config.yaml with mcp_servers carrying env secrets."""
+        import yaml as _yaml
+        config = {
+            "mcp_servers": {
+                "supabase": {
+                    "command": "npx",
+                    "args": ["-y", "@supabase/mcp-server-supabase@latest"],
+                    "env": {
+                        "SUPABASE_ACCESS_TOKEN": "test-fake-supabase-token-1234567890abcdef",
+                        "SUPABASE_URL": "https://example.supabase.co",
+                    },
+                    "enabled": True,
+                },
+                "vimeo": {
+                    "command": "node",
+                    "env": {"VIMEO_ACCESS_TOKEN": "test-fake-vimeo-token-1234567890abcdef"},
+                    "enabled": True,
+                },
+            }
+        }
+        (tmp_path / "config.yaml").write_text(_yaml.safe_dump(config, sort_keys=False))
+
+    def test_config_get_masks_mcp_env_tokens(self, _isolated_hermes_home, capsys):
+        """``hermes config get mcp_servers`` must mask all env tokens."""
+        self._write_mcp_config(_isolated_hermes_home)
+        capsys.readouterr()
+
+        args = argparse.Namespace(config_command="get", key="mcp_servers", json=False)
+        config_command(args)
+
+        out = capsys.readouterr().out
+        # No secret value in cleartext.
+        assert "test-fake-supabase-token-1234567890abcdef" not in out
+        assert "test-fake-vimeo-token-1234567890abcdef" not in out
+        # Masked forms ARE present.
+        assert "SUPABASE_ACCESS_TOKEN:" in out
+        assert "VIMEO_ACCESS_TOKEN:" in out
+        # Non-secret fields stay readable.
+        assert "npx" in out
+        assert "https://example.supabase.co" in out
+        assert "enabled: true" in out
+
+    def test_config_get_json_masks_mcp_env_tokens(self, _isolated_hermes_home, capsys):
+        """``hermes config get mcp_servers --json`` must also mask."""
+        self._write_mcp_config(_isolated_hermes_home)
+        capsys.readouterr()
+
+        args = argparse.Namespace(config_command="get", key="mcp_servers", json=True)
+        config_command(args)
+
+        out = capsys.readouterr().out
+        import json
+        parsed = json.loads(out)
+        # Tokens are masked.
+        assert "test-fake-supabase-token-1234567890abcdef" not in out
+        assert "test-fake-vimeo-token-1234567890abcdef" not in out
+        # Non-secret env var stays readable in JSON output.
+        assert parsed["supabase"]["env"]["SUPABASE_URL"] == "https://example.supabase.co"
+        assert parsed["supabase"]["command"] == "npx"
+
+    def test_config_get_scalar_value_not_masked(self, _isolated_hermes_home, capsys):
+        """A scalar (non-dict) value must pass through unchanged — the redactor
+        only walks dict/list trees.
+        """
+        set_config_value("terminal.timeout", "120")
+        capsys.readouterr()
+
+        args = argparse.Namespace(config_command="get", key="terminal.timeout", json=False)
+        config_command(args)
+
+        assert capsys.readouterr().out.strip() == "120"
+
+
 # #34067: Schema validation for unknown keys
 # ---------------------------------------------------------------------------
 
