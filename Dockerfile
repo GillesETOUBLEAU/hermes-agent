@@ -454,7 +454,9 @@ ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 # check. (A separate launcher hardening is tracked independently.)
 ENV HERMES_TUI_DIR=/opt/hermes/ui-tui
 ENV HERMES_HOME=/opt/data
-ENV HERMES_WRITE_SAFE_ROOT=/opt/data
+# /tmp/hermes_voice: auto voice reply TTS writes its audio there; without it
+# the file_safety safe-root guard rejects every voice bubble on Discord.
+ENV HERMES_WRITE_SAFE_ROOT=/opt/data:/tmp/hermes_voice
 ENV HERMES_DISABLE_LAZY_INSTALLS=1
 # The published image seals /opt/hermes (root-owned, read-only) so a runtime
 # lazy install can't mutate the agent's own venv and brick it. But opt-in
