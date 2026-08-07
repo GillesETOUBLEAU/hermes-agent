@@ -16,8 +16,8 @@ toolsets:
 
 auxiliary:
   approval:
-    provider: "auto"
-    model: ""
+    provider: "openrouter"
+    model: "google/gemini-2.5-flash"
 
 skills:
   external_dirs:

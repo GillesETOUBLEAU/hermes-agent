@@ -26,12 +26,13 @@ toolsets:
 # Autonomie non-supervisée : un assesseur LLM évalue et auto-approuve/refuse les
 # commandes dangereuses + execute_code, au lieu de bloquer en attente d'une
 # validation humaine en chat (défaut approvals.mode=manual, cf. #30882). Sans ça,
-# netlify/git/build restent bloqués. provider "auto" => OpenRouter (gemini-flash,
-# rapide/économe) via OPENROUTER_API_KEY.
+# netlify/git/build restent bloqués. provider épinglé sur openrouter (gemini-flash,
+# rapide/économe) via OPENROUTER_API_KEY — "auto" tentait Nous en fallback et
+# loggait "Auxiliary Nous client unavailable" à chaque run cron/worker.
 auxiliary:
   approval:
-    provider: "auto"
-    model: ""
+    provider: "openrouter"
+    model: "google/gemini-2.5-flash"
 
 mcp_servers:
   # GitHub — serveur MCP officiel hébergé, auth par PAT en Bearer.

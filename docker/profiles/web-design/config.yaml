@@ -35,11 +35,12 @@ toolsets:
 
 # Autonomie non-supervisée : assesseur LLM pour auto-approuver/refuser les
 # commandes dangereuses au lieu de bloquer en attente d'une validation humaine
-# (défaut approvals.mode=manual, cf. #30882). provider "auto" => OpenRouter.
+# (défaut approvals.mode=manual, cf. #30882). provider épinglé sur openrouter
+# ("auto" tentait Nous en fallback → warning "Auxiliary Nous client unavailable").
 auxiliary:
   approval:
-    provider: "auto"
-    model: ""
+    provider: "openrouter"
+    model: "google/gemini-2.5-flash"
 
 # Skills désactivées (2026-08-05) : bundles Nous hors-scope (ML/fine-tuning,
 # jeux, art génératif, intégrations inutilisées). Liste identique sur les 5

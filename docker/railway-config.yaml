@@ -34,6 +34,14 @@ terminal:
 compression:
   enabled: true
 
+# Tâches auxiliaires (approval, compression, titres…) épinglées sur OpenRouter :
+# le fallback "auto" tentait Nous et loggait "Auxiliary Nous client unavailable"
+# à chaque run cron/worker (aucun auth Nous configuré sur Railway).
+auxiliary:
+  approval:
+    provider: "openrouter"
+    model: "google/gemini-2.5-flash"
+
 # Voix Discord — ElevenLabs des deux côtés, une seule clé (ELEVENLABS_API_KEY,
 # var Railway). TTS : bulles vocales (/voice on|tts) + voice channels
 # (/voice join). STT : Scribe transcrit ce qui est dit dans le voice channel.
