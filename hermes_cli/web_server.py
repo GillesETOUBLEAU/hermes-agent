@@ -17967,10 +17967,24 @@ def start_server(
         # the real connection peer rather than X-Forwarded-For's rewritten
         # value (which would defeat the loopback gate when behind a reverse
         # proxy).  When the OAuth gate is active we are explicitly running
-        # behind a TLS terminator (Fly.io) and need X-Forwarded-Proto to
-        # decide cookie Secure flags, so we flip proxy_headers on for that
-        # mode.
+        # behind a TLS terminator (Fly.io, Railway) and need
+        # X-Forwarded-Proto to decide cookie Secure flags, so we flip
+        # proxy_headers on for that mode.
         proxy_headers=bool(app.state.auth_required),
+        # proxy_headers alone is not enough: uvicorn only honours the
+        # X-Forwarded-* headers when the direct peer is in
+        # forwarded_allow_ips, which defaults to 127.0.0.1.  Railway's
+        # (and Fly's) TLS terminator reaches the container from a private
+        # network IP, so with the default the forwarded scheme is ignored,
+        # detect_https() sees "http", and session cookies are minted
+        # without the Secure flag.  In gated mode the container is only
+        # reachable through that terminator, so trusting every peer is
+        # safe; operators can narrow it via FORWARDED_ALLOW_IPS.
+        forwarded_allow_ips=(
+            (os.environ.get("FORWARDED_ALLOW_IPS") or "*")
+            if app.state.auth_required
+            else None
+        ),
         # Half-open detection for public binds only (see above). Loopback
         # disables the protocol ping (None) so an event-loop stall can never
         # trigger a false disconnect; a genuinely dead local client is still
