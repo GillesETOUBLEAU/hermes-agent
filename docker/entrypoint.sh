@@ -548,4 +548,32 @@ esac
 if [ $# -gt 0 ] && command -v "$1" >/dev/null 2>&1; then
     exec "$@"
 fi
+
+# On Railway, a redeploy SIGTERMs the outgoing container. The gateway
+# intentionally exits 1 on an unplanned SIGTERM (so systemd Restart=on-failure
+# can revive it on bare-metal installs), but Railway reads any non-zero exit
+# as a crash and emails a "deployment crashed" alert on every rebuild. Run the
+# gateway as a supervised child, forward the signal, and report a clean stop
+# when the non-zero exit was caused by that SIGTERM. A genuine crash (no
+# SIGTERM observed) still exits non-zero and still alerts.
+if [ -n "${RAILWAY_ENVIRONMENT:-}" ] && [ "${1:-}" = "gateway" ]; then
+    _got_term=0
+    hermes "$@" &
+    _hermes_pid=$!
+    _forward_term() { _got_term=1; kill -TERM "$_hermes_pid" 2>/dev/null; }
+    trap _forward_term TERM INT
+    _code=0
+    while :; do
+        # `wait` returns >128 immediately when interrupted by the trap while
+        # the child is still draining; loop until the child has really exited
+        # so we read its actual exit code.
+        wait "$_hermes_pid" && _code=0 || _code=$?
+        kill -0 "$_hermes_pid" 2>/dev/null || break
+    done
+    if [ "$_got_term" = 1 ] && [ "$_code" -ne 0 ]; then
+        echo "[entrypoint] gateway exited $_code after SIGTERM (redeploy shutdown) — reporting clean stop to Railway"
+        exit 0
+    fi
+    exit "$_code"
+fi
 exec hermes "$@"
