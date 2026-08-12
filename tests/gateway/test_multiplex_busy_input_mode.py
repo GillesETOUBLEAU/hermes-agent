@@ -320,7 +320,18 @@ async def test_missing_or_invalid_secondary_mode_falls_back_to_gateway_default(
     assert runner._busy_text_mode == "queue"
 
 
-def test_profile_route_and_nonmultiplexed_resolution_preserve_boundaries():
+def test_profile_route_and_nonmultiplexed_resolution_preserve_boundaries(
+    tmp_path, monkeypatch
+):
+    import gateway.run as gateway_run
+
+    # Route targets are validated against the served-profile set (resolved
+    # from profiles on disk); serve "research" so the route is accepted.
+    monkeypatch.setattr(
+        gateway_run,
+        "_multiplex_profile_homes",
+        lambda config: [("research", tmp_path / "research")],
+    )
     runner = _runner(default_mode="interrupt")
     runner._snapshot_profile_busy_modes(
         "research",

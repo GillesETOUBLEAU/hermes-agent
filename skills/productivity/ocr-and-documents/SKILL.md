@@ -1,6 +1,6 @@
 ---
 name: ocr-and-documents
-description: "Extract text from PDFs/scans (pymupdf, tesseract, marker-pdf)."
+description: "Extract text from PDFs and scans (pymupdf, tesseract)."
 version: 2.4.0
 author: Hermes Agent
 license: MIT

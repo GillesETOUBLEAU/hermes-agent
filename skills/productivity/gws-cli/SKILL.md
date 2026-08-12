@@ -1,9 +1,10 @@
 ---
 name: gws-cli
-description: Google Workspace CLI (gws) — a unified command-line tool for all Google Workspace APIs. Provides high-level helper commands for Gmail triage, calendar agenda, Drive uploads, standup reports, and weekly digests. Complements the google-workspace Python skill with automation-focused workflows and dynamic API discovery.
+description: "Google Workspace CLI (gws): Gmail, Calendar, Drive tasks."
 version: 1.0.0
 author: GillesETOUBLEAU
 license: MIT
+platforms: [linux, macos, windows]
 required_environment_variables:
   - name: GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE
     prompt: "Path to gws credentials JSON file"
