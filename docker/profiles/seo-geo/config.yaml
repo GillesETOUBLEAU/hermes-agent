@@ -101,6 +101,15 @@ mcp_servers:
       # les utilisateurs WordPress.
       exclude: ["wp_delete_*", "wp_create_user", "wp_update_user"]
 
+  # DeepL — serveur MCP hébergé, auth OAuth 2.1 (aucune clé). Les jetons sont
+  # partagés entre tous les profils via le lien mcp-tokens/ posé par
+  # l'entrypoint : une seule autorisation suffit. Procédure de login initial et
+  # pièges : voir docker/railway-config.yaml.
+  deepl:
+    url: "https://mcp.deepl.com/v1/mcp"
+    auth: oauth
+    enabled: true
+
   # parse.bot — MCP distant officiel (Streamable HTTP, docs.parse.bot/mcp).
   # Même clé que le REST (X-API-Key, préfixe pmx_). Sert la sync YachtWorld
   # (call_endpoint sur get_broker_listings) ; le REST reste le fallback

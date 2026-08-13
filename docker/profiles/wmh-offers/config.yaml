@@ -19,6 +19,16 @@ auxiliary:
     provider: "openrouter"
     model: "google/gemini-2.5-flash"
 
+# DeepL — serveur MCP hébergé, auth OAuth 2.1 (aucune clé). Les jetons sont
+# partagés entre tous les profils via le lien mcp-tokens/ posé par
+# l'entrypoint : une seule autorisation suffit. Procédure de login initial et
+# pièges : voir docker/railway-config.yaml.
+mcp_servers:
+  deepl:
+    url: "https://mcp.deepl.com/v1/mcp"
+    auth: oauth
+    enabled: true
+
 skills:
   external_dirs:
     - /opt/data/skills

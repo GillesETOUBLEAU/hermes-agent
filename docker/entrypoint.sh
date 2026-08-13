@@ -339,6 +339,38 @@ if [ -f "$HERMES_HOME/google_token.json" ] && [ -d "$HERMES_HOME/profiles" ]; th
     done
 fi
 
+# Share MCP OAuth tokens across every profile. tools/mcp_oauth.py resolves the
+# token store at get_hermes_home()/mcp-tokens/, so without this each profile
+# would need its own interactive `hermes mcp login` for the same account (DeepL
+# today) — and the login needs a browser, so it cannot happen on boot.
+#
+# A DIRECTORY symlink is used where the Google block above uses file symlinks,
+# and the distinction matters: _write_json() in tools/mcp_oauth.py writes a temp
+# file alongside the target then os.replace()s it into place, which would
+# silently clobber a per-file symlink on the first token refresh and let the
+# profiles drift apart. Replacing a path *inside* a symlinked directory leaves
+# the link itself untouched, so refreshes stay shared.
+#
+# First boot migrates any real per-profile store up into the shared one (cp -n:
+# never overwrite a newer shared token).
+_MCP_TOKENS="$HERMES_HOME/mcp-tokens"
+if [ -d "$HERMES_HOME/profiles" ]; then
+    mkdir -p "$_MCP_TOKENS"
+    for _pd in "$HERMES_HOME"/profiles/*/; do
+        [ -d "$_pd" ] || continue
+        if [ -d "${_pd}mcp-tokens" ] && [ ! -L "${_pd}mcp-tokens" ]; then
+            cp -an "${_pd}mcp-tokens/." "$_MCP_TOKENS/" 2>/dev/null || true
+            rm -rf "${_pd}mcp-tokens"
+        fi
+        # -n is required: without it, ln would drop the link INSIDE an existing
+        # symlinked directory instead of replacing it.
+        ln -sfn "$_MCP_TOKENS" "${_pd}mcp-tokens" 2>/dev/null || true
+    done
+    chown -R hermes:hermes "$_MCP_TOKENS" 2>/dev/null || true
+    chmod 700 "$_MCP_TOKENS" 2>/dev/null || true
+    echo "[entrypoint] MCP OAuth: shared token store → $_MCP_TOKENS"
+fi
+
 # gws CLI — set up config directory and bridge credentials if available
 GWS_CONFIG_DIR="$HERMES_HOME/gws-config"
 mkdir -p "$GWS_CONFIG_DIR"

@@ -86,6 +86,42 @@ platform_toolsets:
   cli: [hermes-cli]
   discord: [hermes-discord]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DeepL — serveur MCP hébergé (Streamable HTTP), traduction / reformulation /
+# correction / traduction de documents. Aucune clé : OAuth 2.1 avec
+# enregistrement de client dynamique + PKCE S256 et scope `offline_access`
+# (refresh token → l'accès se renouvelle seul).
+#
+# Les jetons vivent dans $HERMES_HOME/mcp-tokens/, PARTAGÉ entre tous les
+# profils par un lien symbolique de RÉPERTOIRE posé par l'entrypoint : une
+# seule autorisation couvre les 5 profils. Ce répertoire n'est jamais réécrit
+# par l'entrypoint, donc l'auth survit aux redeploys (contrairement à ce
+# fichier, recopié depuis le repo à chaque boot Railway).
+#
+# Autorisation initiale — une seule fois, navigateur requis :
+#   railway ssh
+#   su hermes -s /bin/sh -c '/opt/hermes/.venv/bin/hermes mcp login deepl'
+# puis coller l'URL de redirection `localhost:PORT/callback?code=…` au prompt
+# (le conteneur est headless : le fallback « paste » remplace le callback HTTP).
+# Trois pièges, tous rencontrés le 2026-08-13 :
+#   1. lancer en tant que `hermes`, JAMAIS root — `railway ssh` ouvre une
+#      session root et un mcp-tokens/ root:root en 0700 verrouille la gateway ;
+#   2. un seul login à la fois — le client enregistré épingle le port de
+#      redirection, deux runs concurrents se disputent le port ; ne PAS fixer un
+#      autre `oauth.redirect_port`, DeepL rejetterait le redirect_uri divergent ;
+#   3. ne coller que si le prompt de paste est affiché — dans bash, les `&` de
+#      l'URL la découpent en jobs d'arrière-plan.
+#
+# NB : ce siège DeepL n'expose que 8 des 16 outils documentés (pas de
+# glossaires ni de style rules — affaire de palier d'abonnement). Pour les
+# glossaires et le quota, la skill `deepl-translation` couvre l'API REST v2.
+# ─────────────────────────────────────────────────────────────────────────────
+mcp_servers:
+  deepl:
+    url: "https://mcp.deepl.com/v1/mcp"
+    auth: oauth
+    enabled: true
+
 # Skills désactivées (2026-08-05) : bundles Nous hors-scope (ML/fine-tuning,
 # jeux, art génératif, intégrations inutilisées). Liste identique sur les 5
 # profils. Le entrypoint rafraîchit config.yaml depuis ce template à CHAQUE
