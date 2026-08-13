@@ -79,6 +79,32 @@ if [ "$(id -u)" = "0" ]; then
         chown hermes:hermes "$HERMES_HOME/logs/gateways" 2>/dev/null || true
     fi
 
+    # Always repair ownership of the shared MCP OAuth token store — same trap
+    # as the pairing block above. `railway ssh` opens a root session, so a
+    # `hermes mcp login <server>` run from there leaves a root-owned
+    # mcp-tokens/ at 0700 that the unprivileged gateway cannot even traverse.
+    # That is not a graceful degradation: HermesTokenStorage.get_tokens()
+    # raises PermissionError (Path.exists() propagates EACCES), and
+    # _is_auth_error() in tools/mcp_tool.py does not classify PermissionError,
+    # so the "mark the server failed and back off" path never runs and the
+    # gateway is taken down with it.
+    #
+    # This must live here, as root. The migration/symlink pass further down
+    # needs $HERMES_HOME/profiles/ to exist, which is only seeded after the
+    # privilege drop — so it runs as hermes and cannot chown anything back.
+    if [ -d "$HERMES_HOME/mcp-tokens" ] && [ ! -L "$HERMES_HOME/mcp-tokens" ]; then
+        chown -R hermes:hermes "$HERMES_HOME/mcp-tokens" 2>/dev/null || true
+        chmod 700 "$HERMES_HOME/mcp-tokens" 2>/dev/null || true
+    fi
+    # Per-profile stores too: a root-owned one would also defeat the `rm -rf`
+    # in that migration pass, stranding the profile on an unreadable store.
+    for _pd in "$HERMES_HOME"/profiles/*/; do
+        [ -d "$_pd" ] || continue
+        if [ -d "${_pd}mcp-tokens" ] && [ ! -L "${_pd}mcp-tokens" ]; then
+            chown -R hermes:hermes "${_pd}mcp-tokens" 2>/dev/null || true
+        fi
+    done
+
     # Ensure config.yaml is readable by the hermes runtime user even if it was
     # edited on the host after initial ownership setup. Must run here (as root)
     # rather than after the privilege drop, otherwise a non-root caller like
@@ -366,8 +392,18 @@ if [ -d "$HERMES_HOME/profiles" ]; then
         # symlinked directory instead of replacing it.
         ln -sfn "$_MCP_TOKENS" "${_pd}mcp-tokens" 2>/dev/null || true
     done
+    # Best-effort only: this pass runs as hermes, so these can only ever
+    # succeed on paths hermes already owns (i.e. a store this block just
+    # created). Repairing a root-owned store — the `railway ssh` + `hermes mcp
+    # login` case — is done in the root block near the top of this script,
+    # which is the last point where we still have the privileges to do it.
     chown -R hermes:hermes "$_MCP_TOKENS" 2>/dev/null || true
     chmod 700 "$_MCP_TOKENS" 2>/dev/null || true
+    if [ ! -r "$_MCP_TOKENS" ] || [ ! -x "$_MCP_TOKENS" ]; then
+        echo "[entrypoint] WARNING: $_MCP_TOKENS is not readable by $(id -un) —" \
+             "OAuth MCP servers will fail to start. Fix with:" \
+             "chown -R hermes:hermes $_MCP_TOKENS (as root), then restart."
+    fi
     echo "[entrypoint] MCP OAuth: shared token store → $_MCP_TOKENS"
 fi
 
