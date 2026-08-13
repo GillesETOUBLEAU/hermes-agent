@@ -1,6 +1,7 @@
 """Tests for tools/mcp_oauth.py — OAuth 2.1 PKCE support for MCP servers."""
 
 import json
+import os
 import stat
 import sys
 from io import BytesIO
@@ -122,6 +123,36 @@ class TestHermesTokenStorage:
 
         import asyncio
         assert asyncio.run(storage.get_tokens()) is None
+
+    @pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX mode bits not enforced on Windows")
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses directory permission checks")
+    def test_unreadable_token_store_degrades_to_none(self, tmp_path, monkeypatch):
+        """An untraversable ``mcp-tokens/`` must read as "no tokens", not raise.
+
+        ``hermes mcp login`` run as root — what ``railway ssh`` hands you —
+        leaves a 0700 root-owned store the unprivileged gateway cannot
+        traverse. ``Path.exists()`` only swallows ENOENT/ENOTDIR/EBADF/ELOOP,
+        so EACCES propagates, and ``PermissionError`` is not one of
+        ``_get_auth_error_types()``. An exception escaping here therefore
+        bypasses the graceful re-authorization path and takes MCP connection
+        setup down with it. Degrade to "absent" so the normal
+        non-interactive OAuth flow reports an actionable error instead.
+        """
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        storage = HermesTokenStorage("locked-server")
+
+        d = tmp_path / "mcp-tokens"
+        d.mkdir(parents=True)
+        (d / "locked-server.json").write_text('{"access_token": "abc"}')
+        (d / "locked-server.client.json").write_text('{"client_id": "abc"}')
+        d.chmod(0o000)
+        try:
+            assert asyncio.run(storage.get_tokens()) is None
+            assert asyncio.run(storage.get_client_info()) is None
+            assert storage.has_cached_tokens() is False
+            assert storage.poison_client_registration() is False
+        finally:
+            d.chmod(0o700)
 
 
 # ---------------------------------------------------------------------------

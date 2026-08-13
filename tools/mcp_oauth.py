@@ -374,10 +374,21 @@ def _can_open_browser() -> bool:
 
 
 def _read_json(path: Path) -> dict | None:
-    """Read a JSON file, returning None if it doesn't exist or is invalid."""
-    if not path.exists():
-        return None
+    """Read a JSON file, returning None if it's missing, invalid or unreadable.
+
+    ``exists()`` is inside the ``try``: it only swallows ENOENT/ENOTDIR/EBADF/
+    ELOOP, so a token store the process cannot traverse (a 0700 root-owned
+    ``mcp-tokens/`` left behind by ``hermes mcp login`` run as root) raises
+    EACCES straight out of here. That exception is not one of
+    ``_get_auth_error_types()``, so callers never route it to the graceful
+    "re-authorize this server" path and it escapes into MCP connection setup.
+    Degrading to None instead surfaces it as "no tokens" — the normal
+    OAuthNonInteractiveError flow, which tells the operator to run
+    ``hermes mcp login`` — and the warning below names the real cause.
+    """
     try:
+        if not path.exists():
+            return None
         return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read %s: %s", path, exc)
@@ -624,7 +635,14 @@ class HermesTokenStorage:
         Returns True if a client file was present and removed.
         """
         client_path = self._client_info_path()
-        if not client_path.exists():
+        # Guarded like _read_json: this runs on the auth-error recovery path,
+        # which is precisely when an unreadable store is in play — an escaping
+        # EACCES here would convert a handled auth error into an unhandled one.
+        try:
+            if not client_path.exists():
+                return False
+        except OSError as exc:
+            logger.warning("Cannot reach client info at %s: %s", client_path, exc)
             return False
         backup = client_path.with_name(client_path.name + ".bak")
         try:
@@ -641,8 +659,17 @@ class HermesTokenStorage:
         return True
 
     def has_cached_tokens(self) -> bool:
-        """Return True if we have tokens on disk (may be expired)."""
-        return self._tokens_path().exists()
+        """Return True if we have tokens on disk (may be expired).
+
+        Unreadable counts as absent for the same reason as ``_read_json``: an
+        EACCES from an unreachable token store must not escape into MCP
+        connection setup as an unclassified exception.
+        """
+        try:
+            return self._tokens_path().exists()
+        except OSError as exc:
+            logger.warning("Failed to stat %s: %s", self._tokens_path(), exc)
+            return False
 
 
 # ---------------------------------------------------------------------------
