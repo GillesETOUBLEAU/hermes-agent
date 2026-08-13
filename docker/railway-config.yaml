@@ -112,9 +112,23 @@ platform_toolsets:
 #   3. ne coller que si le prompt de paste est affiché — dans bash, les `&` de
 #      l'URL la découpent en jobs d'arrière-plan.
 #
-# NB : ce siège DeepL n'expose que 8 des 16 outils documentés (pas de
-# glossaires ni de style rules — affaire de palier d'abonnement). Pour les
-# glossaires et le quota, la skill `deepl-translation` couvre l'API REST v2.
+# ⚠ Le compte utilisé pour l'OAuth est sur le plan **DeepL Free** (constaté
+# 2026-08-13 : un appel translate-text avec glossaryId renvoie « glossaryId,
+# styleId, context and customInstructions are not available on the DeepL Free
+# plan »). Conséquence : seuls 8 des 16 outils sont exposés — pas de
+# glossaires, pas de style rules — et les paramètres glossaryId / styleId /
+# context / customInstructions sont refusés sur translate-text.
+#
+# Ce n'est PAS une fatalité : la clé REST `DEEPL_AUTH_KEY` de WMH, elle, est
+# Pro. Pour débloquer les 16 outils, il faut réautoriser avec le compte DeepL
+# porteur du siège Pro :
+#   rm /opt/data/mcp-tokens/deepl.*   # purge le compte Free (partagé, donc
+#                                     # vaut pour les 5 profils d'un coup)
+#   su hermes -s /bin/sh -c '/opt/hermes/.venv/bin/hermes mcp login deepl'
+# en veillant à choisir le bon compte dans le navigateur.
+#
+# En attendant, glossaires et quota passent par l'API REST v2 — couverts par
+# la skill `deepl-translation`, qui arbitre MCP d'abord / HTTP pour le reste.
 # ─────────────────────────────────────────────────────────────────────────────
 mcp_servers:
   deepl:
