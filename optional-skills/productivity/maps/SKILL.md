@@ -1,12 +1,10 @@
 ---
 name: maps
-description: >
-  Geocoding, reverse geocoding, nearby POI search (44 categories),
-  distance/routing, turn-by-turn directions, timezone lookup, bounding box
-  search, and area info. Uses OpenStreetMap + Overpass + OSRM. Free, no API key.
+description: Geocoding, places, routing, timezones via OpenStreetMap.
 version: 1.1.0
 author: Mibayy
 license: MIT
+platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [maps, geocoding, places, routing, distance, directions, openstreetmap, nominatim, overpass, osrm]
