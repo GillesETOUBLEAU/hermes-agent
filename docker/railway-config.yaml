@@ -22,11 +22,12 @@ model:
   provider: "anthropic"
 
 # Bascule automatique mi-session si le primaire sature, conversation préservée.
-# Le primaire étant désormais Anthropic en direct, ce fallback couvre un
-# incident propre au modèle, pas une panne du fournisseur.
+# Kimi K3 via OpenRouter : fournisseur ET modèle différents du primaire, donc
+# le secours couvre aussi une panne côté Anthropic. C'est l'orchestrateur qui
+# tournait jusqu'au 2026-08-20, il a fait ses preuves sur ce rôle.
 fallback_providers:
-  - provider: anthropic
-    model: "claude-opus-5"
+  - provider: openrouter
+    model: "moonshotai/kimi-k3"
 
 gateway:
   platforms:
