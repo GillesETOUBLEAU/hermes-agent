@@ -1,8 +1,10 @@
 # Hermes Agent — Railway Configuration
-# Pre-configured for the Discord gateway (orchestrateur unique) with models
-# served via OpenRouter. Environment variables (OPENROUTER_API_KEY,
-# DISCORD_BOT_TOKEN, etc.) are injected by Railway and loaded from the
-# container's .env file.
+# Pre-configured for the Discord gateway (orchestrateur unique). L'orchestrateur
+# tourne en direct sur l'API Anthropic ; les tâches auxiliaires et les crons
+# restent sur OpenRouter. Les variables d'environnement (ANTHROPIC_API_KEY,
+# OPENROUTER_API_KEY, DISCORD_BOT_TOKEN, etc.) sont injectées par Railway.
+# NB : sur Railway l'entrypoint vide le .env du conteneur à chaque boot — les
+# secrets viennent des variables Railway, pas du fichier.
 #
 # WhatsApp a été RETIRÉ définitivement (2026-07-26) : le client non officiel
 # (Baileys) viole les CGU de Meta, et le nouveau flux d'appairage par passkey
@@ -10,16 +12,18 @@
 # unique d'orchestration. Historique complet : git log sur ce fichier.
 
 model:
-  # Orchestrateur (profil défaut) : Kimi K3 via OpenRouter (choix Gilles
-  # 2026-08-04). Historique : qwen/GLM exécutaient au lieu de router →
-  # Haiku 4.5 → Opus 4.8 (OpenRouter) → Opus 5 (direct, 2026-07-26) → Kimi K3.
-  # ⚠️ La discipline route-only (SOUL.md) avait déjà cassé sur des modèles
-  # non-Claude — surveiller que kimi-k3 triage/route sans exécuter.
-  default: "moonshotai/kimi-k3"
-  provider: "openrouter"
+  # Orchestrateur (profil défaut) : Opus 4.8 en DIRECT sur l'API Anthropic
+  # (ANTHROPIC_API_KEY, var Railway) — choix Gilles 2026-08-20, budget assumé.
+  # Historique : qwen/GLM exécutaient au lieu de router → Haiku 4.5 → Opus 4.8
+  # (via OpenRouter) → Opus 5 (direct, 2026-07-26) → Kimi K3 (2026-08-04) →
+  # Opus 4.8 direct. La discipline route-only (SOUL.md) tient mieux sur les
+  # modèles Claude ; c'est la raison du retour en direct.
+  default: "claude-opus-4-8"
+  provider: "anthropic"
 
-# Bascule automatique mi-session si OpenRouter/kimi sature : Opus 5 en direct
-# sur l'API Anthropic (ANTHROPIC_API_KEY, var Railway), conversation préservée.
+# Bascule automatique mi-session si le primaire sature, conversation préservée.
+# Le primaire étant désormais Anthropic en direct, ce fallback couvre un
+# incident propre au modèle, pas une panne du fournisseur.
 fallback_providers:
   - provider: anthropic
     model: "claude-opus-5"
