@@ -292,8 +292,15 @@ fi
 # The credential helper reads the PAT from the environment at run time, so no
 # token is ever written to the volume; the helper also serves the agent's own
 # `git push` after wiki edits (SOUL.md instructs it to publish).
+# Le wiki utilise WIKI_GIT_TOKEN quand il existe : un PAT fine-grained limité au
+# seul dépôt du wiki (Contents read/write). C'est le seul chemin git AUTOMATIQUE et
+# permanent du déploiement — il tourne à chaque boot sans supervision — donc il
+# mérite le token minimal, pas le PAT large que partagent `gh` et le MCP GitHub.
+# Repli sur GITHUB_PERSONAL_ACCESS_TOKEN si la variable n'est pas posée, pour que
+# les déploiements qui n'ont qu'un seul token continuent de fonctionner tels quels.
 if [ -n "${WIKI_PATH:-}" ] && [ -d "${WIKI_PATH:-}" ] && [ -n "${WIKI_GIT_REMOTE:-}" ] \
-    && [ -n "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ] && command -v git >/dev/null 2>&1; then
+    && [ -n "${WIKI_GIT_TOKEN:-}${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ] \
+    && command -v git >/dev/null 2>&1; then
     (
         set +e
         cd "$WIKI_PATH" || exit 0
@@ -304,8 +311,10 @@ if [ -n "${WIKI_PATH:-}" ] && [ -d "${WIKI_PATH:-}" ] && [ -n "${WIKI_GIT_REMOTE
         fi
         git config user.name "hermes-agent"
         git config user.email "hermes-agent@noreply.railway.app"
+        # Le helper lit la variable à l'exécution : rien n'est écrit sur le volume,
+        # et il sert aussi les `git push` que l'agent fait après ses éditions.
         git config credential.helper \
-            '!f() { echo username=x-access-token; echo "password=${GITHUB_PERSONAL_ACCESS_TOKEN}"; }; f'
+            '!f() { echo username=x-access-token; echo "password=${WIKI_GIT_TOKEN:-$GITHUB_PERSONAL_ACCESS_TOKEN}"; }; f'
         if git remote get-url origin >/dev/null 2>&1; then
             git remote set-url origin "$WIKI_GIT_REMOTE"
         else
