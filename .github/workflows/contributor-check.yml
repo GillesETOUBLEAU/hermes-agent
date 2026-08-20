@@ -12,6 +12,12 @@ permissions:
 
 jobs:
   check-attribution:
+    # Upstream-only. This gate polices contributions flowing INTO
+    # NousResearch/hermes-agent; on a fork it evaluates the whole catch-up
+    # range at once, so every upstream author email that upstream itself never
+    # mapped (their check only ever sees one PR's commits) surfaces here as a
+    # permanent failure. Same repository guard as skills-index-freshness.yml.
+    if: github.repository == 'NousResearch/hermes-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:

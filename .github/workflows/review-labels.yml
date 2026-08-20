@@ -50,7 +50,13 @@ permissions:
 jobs:
   check:
     name: Review label gate
-    if: inputs.ci_review || inputs.mcp_catalog || inputs.supply_chain
+    # Upstream-only, like contributor-check.yml. The 'ci-reviewed' label is a
+    # NousResearch review-discipline attestation; on this fork a catch-up merge
+    # carries upstream's own CI-file changes, so the gate fires every cycle on
+    # changes nobody here authored.
+    if: >-
+      github.repository == 'NousResearch/hermes-agent'
+      && (inputs.ci_review || inputs.mcp_catalog || inputs.supply_chain)
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
