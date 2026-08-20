@@ -107,6 +107,60 @@ def _format_missing_scopes(missing_scopes: list[str]) -> str:
     )
 
 
+def _credentials_without_scopes(payload: dict):
+    """Build credentials that refresh WITHOUT sending a scope parameter.
+
+    ``from_authorized_user_file`` defaults ``scopes`` to the list recorded in
+    the token file, and google-auth forwards it to the token endpoint. If that
+    list has drifted from what the refresh token was actually granted, Google
+    answers ``invalid_scope: Bad Request`` even though the token is alive.
+    Omitting scopes entirely makes the endpoint return whatever was granted,
+    which is the authoritative liveness test.
+    """
+    from google.oauth2.credentials import Credentials
+
+    stripped = {k: v for k, v in payload.items() if k != "scopes"}
+    try:
+        return Credentials.from_authorized_user_info(stripped)
+    except Exception:
+        return None
+
+
+def _refresh_or_realign(creds, payload: dict):
+    """Refresh ``creds``; on invalid_scope, retry without a scope parameter.
+
+    Returns the credentials that succeeded. A scope mismatch must never be
+    reported as a dead token — only a failure of the scopeless retry is
+    conclusive, so that error is the one propagated.
+    """
+    from google.auth.transport.requests import Request
+
+    try:
+        creds.refresh(Request())
+        return creds
+    except Exception as e:
+        if "invalid_scope" not in str(e).lower():
+            raise
+        fallback = _credentials_without_scopes(payload)
+        if fallback is None:
+            raise
+        fallback.refresh(Request())
+        return fallback
+
+
+def _persist_credentials(creds, previous_payload: dict) -> dict:
+    """Write refreshed credentials back, preserving the recorded scope list.
+
+    A scopeless refresh carries no scope set, so ``to_json()`` would blank the
+    "scopes" field that google_api.py reads to build its own credentials.
+    """
+    refreshed = _normalize_authorized_user_payload(json.loads(creds.to_json()))
+    if not refreshed.get("scopes") and previous_payload.get("scopes"):
+        refreshed["scopes"] = previous_payload["scopes"]
+    TOKEN_PATH.write_text(json.dumps(refreshed, indent=2), encoding="utf-8")
+    return refreshed
+
+
 def _missing_required_packages() -> list[str]:
     """Return exact requirements absent or stale in this interpreter.
 
@@ -223,13 +277,12 @@ def check_auth(quiet: bool = False):
 
     _ensure_deps()
     from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
 
     try:
-        # Don't pass scopes — user may have authorized only a subset.
-        # Passing scopes forces google-auth to validate them on refresh,
-        # which fails with invalid_scope if the token has fewer scopes
-        # than requested.
+        # Don't pass scopes — google-auth then falls back to the list stored
+        # in the token file, instead of this module's hardcoded SCOPES. Those
+        # two drift apart across skill versions, and any mismatch makes the
+        # refresh fail with invalid_scope on a perfectly healthy token.
         creds = Credentials.from_authorized_user_file(str(TOKEN_PATH))
     except Exception as e:
         print(f"TOKEN_CORRUPT: {e}")
@@ -248,14 +301,8 @@ def check_auth(quiet: bool = False):
 
     if creds.expired and creds.refresh_token:
         try:
-            creds.refresh(Request())
-            TOKEN_PATH.write_text(
-                json.dumps(
-                    _normalize_authorized_user_payload(json.loads(creds.to_json())),
-                    indent=2,
-                ), encoding="utf-8"
-            )
-            missing_scopes = _missing_scopes_from_payload(_load_token_payload(TOKEN_PATH))
+            creds = _refresh_or_realign(creds, payload)
+            missing_scopes = _missing_scopes_from_payload(_persist_credentials(creds, payload))
             if missing_scopes:
                 print(f"AUTHENTICATED (partial): Token refreshed but missing {len(missing_scopes)} scopes:")
                 for s in missing_scopes:
@@ -277,6 +324,11 @@ def check_auth(quiet: bool = False):
             elif "token_revoked" in err_str or "invalid_grant" in err_str:
                 print(f"TOKEN_REVOKED: {e}")
                 print("  Re-run setup to re-authenticate.")
+            elif "invalid_scope" in err_str:
+                print(f"SCOPE_MISMATCH: {e}")
+                print("  The refresh token is alive but its granted scopes do not match")
+                print(f"  the ones recorded in {TOKEN_PATH}, and the scopeless retry also failed.")
+                print("  Re-run setup to re-consent with the current scope list.")
             else:
                 print(f"REFRESH_FAILED: {e}")
             return False
@@ -457,12 +509,13 @@ def revoke():
 
     _ensure_deps()
     from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
 
     try:
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+        # No explicit scopes: forcing SCOPES here made --revoke fail with
+        # invalid_scope on any token granted a different set.
+        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH))
         if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            creds = _refresh_or_realign(creds, _load_token_payload(TOKEN_PATH))
 
         import urllib.request
         urllib.request.urlopen(

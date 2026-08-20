@@ -181,6 +181,20 @@ if [ -f "$INSTALL_DIR/docker/SOUL.md" ] && { [ -n "$RAILWAY_ENVIRONMENT" ] || [ 
     cp "$INSTALL_DIR/docker/SOUL.md" "$HERMES_HOME/SOUL.md"
 fi
 
+# The default profile lives directly at $HERMES_HOME, not under profiles/<name>,
+# so the named-profile loop below never refreshed its skills/ copy. It kept a
+# pre-2026-04
+# google-workspace skill whose hardcoded SCOPES ended in documents.readonly
+# while the live token carries documents — enough of a mismatch for Google to
+# answer invalid_scope, making `setup.py --check` report REFRESH_FAILED on a
+# healthy token. Refresh it from the bundled copy like every other profile.
+_gwsk="$INSTALL_DIR/skills/productivity/google-workspace"
+if [ -d "$_gwsk" ] && { [ -n "$RAILWAY_ENVIRONMENT" ] || [ ! -d "$HERMES_HOME/skills/productivity/google-workspace" ]; }; then
+    mkdir -p "$HERMES_HOME/skills/productivity"
+    rm -rf "$HERMES_HOME/skills/productivity/google-workspace"
+    cp -a "$_gwsk" "$HERMES_HOME/skills/productivity/google-workspace" 2>/dev/null || true
+fi
+
 # --- Named profiles: seed dedicated agents on the volume (idempotent) --------
 # "web-design" and "web-dev" are full Hermes profiles living under
 # $HERMES_HOME/profiles/<name>/. The dashboard (which the Desktop app connects
