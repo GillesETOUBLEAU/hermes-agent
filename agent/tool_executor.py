@@ -161,6 +161,111 @@ def _parse_tool_arguments(raw_arguments: Any) -> tuple[dict, Optional[str]]:
     )
 
 
+def _one_edit_apart(a: str, b: str) -> bool:
+    """True when ``a`` becomes ``b`` with a single insert/delete/substitute.
+
+    Bounded stand-in for a full edit-distance computation: enum snapping only
+    ever cares about distance 1, so the cheap two-pointer walk is enough.
+    """
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        diffs = sum(1 for x, y in zip(a, b) if x != y)
+        return diffs == 1
+    # Length differs by one — walk both, allowing a single skip in the longer.
+    longer, shorter = (a, b) if la > lb else (b, a)
+    i = j = 0
+    skipped = False
+    while i < len(longer) and j < len(shorter):
+        if longer[i] == shorter[j]:
+            i += 1
+            j += 1
+            continue
+        if skipped:
+            return False
+        skipped = True
+        i += 1
+    return True
+
+
+def _enum_properties_for_tool(agent, function_name: str) -> dict:
+    """Map ``{param: [enum values]}`` for a tool, from the schema the model saw.
+
+    Reads ``agent.tools`` (the OpenAI-shaped definitions actually sent on the
+    wire) rather than a separate registry, so MCP and plugin tools are covered
+    on the same footing as built-ins. Returns ``{}`` when the tool is unknown
+    or declares no enums — the overwhelmingly common case, kept cheap.
+    """
+    tools = getattr(agent, "tools", None) or []
+    for tool in tools:
+        try:
+            fn = tool.get("function") if isinstance(tool, dict) else None
+            if not fn or fn.get("name") != function_name:
+                continue
+            props = (fn.get("parameters") or {}).get("properties") or {}
+            return {
+                name: spec["enum"]
+                for name, spec in props.items()
+                if isinstance(spec, dict)
+                and isinstance(spec.get("enum"), list)
+                and spec["enum"]
+            }
+        except (AttributeError, TypeError):
+            continue
+    return {}
+
+
+def _snap_enum_arguments(agent, function_name: str, function_args: dict) -> None:
+    """Snap a near-miss enum argument onto its schema value, in place.
+
+    Providers occasionally hand back an enum value mangled by one character —
+    z-ai/glm-5.2 via OpenRouter spliced its streamed tool-call chunks one char
+    off and produced ``needss_input`` for ``kanban_block(kind=...)``, which the
+    JSON repair pass restores as a *syntactically* valid but semantically wrong
+    value. Left alone it costs a wasted round-trip at best, and on a kanban
+    worker it can burn the task's whole retry budget on a deterministic glitch.
+
+    Only snaps when EXACTLY ONE schema value is a single edit away, so a
+    genuinely ambiguous or plainly wrong value still reaches the tool and gets
+    the normal "must be one of …" error. Case-insensitive exact matches are
+    snapped too (free, and the same class of harmless provider drift).
+
+    Top-level parameters only — that is where enums live in practice, and it
+    keeps the rule easy to reason about from a tool error message.
+    """
+    if not function_args:
+        return
+    try:
+        enums = _enum_properties_for_tool(agent, function_name)
+        if not enums:
+            return
+        for param, allowed in enums.items():
+            value = function_args.get(param)
+            if not isinstance(value, str) or value in allowed:
+                continue
+            candidates = [
+                v for v in allowed
+                if isinstance(v, str) and v.lower() == value.lower()
+            ]
+            if not candidates:
+                candidates = [
+                    v for v in allowed
+                    if isinstance(v, str) and _one_edit_apart(value, v)
+                ]
+            if len(candidates) != 1:
+                continue
+            logger.warning(
+                "Snapped near-miss enum argument %s.%s: %r → %r",
+                function_name, param, value, candidates[0],
+            )
+            function_args[param] = candidates[0]
+    except Exception:
+        # Never let schema weirdness (an MCP server with an exotic shape)
+        # break dispatch — an un-snapped value just reaches the tool.
+        logger.debug("enum snap skipped for %s", function_name, exc_info=True)
+
+
 def _resolve_concurrent_tool_timeout() -> float | None:
     """Resolve the per-batch concurrent tool deadline.
 
@@ -1107,6 +1212,7 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         function_args, malformed_args_result = _parse_tool_arguments(
             tool_call.function.arguments
         )
+        _snap_enum_arguments(agent, function_name, function_args)
 
         if malformed_args_result is not None:
             parsed_calls.append(
@@ -1954,6 +2060,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
         function_args, malformed_args_result = _parse_tool_arguments(
             tool_call.function.arguments
         )
+        _snap_enum_arguments(agent, function_name, function_args)
         if malformed_args_result is not None:
             _emit_terminal_post_tool_call(
                 agent,
