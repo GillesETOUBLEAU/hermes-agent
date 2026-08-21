@@ -183,6 +183,68 @@ def _escape_invalid_chars_in_json_strings(raw: str) -> str:
     return "".join(out)
 
 
+def tool_args_look_truncated(raw: str) -> bool:
+    """True when malformed argument JSON looks CUT OFF rather than corrupted.
+
+    The distinction decides how the caller recovers, so getting it wrong is
+    expensive in both directions:
+
+    * cut off (``{"path": "/etc/ho``) → the model never finished writing.
+      Re-asking with a bigger output budget is the right move.
+    * complete but corrupt (``{"kind": needss_input"}`` — a provider that
+      spliced its streamed chunks one char off) → the model DID finish. The
+      budget is irrelevant; retrying it burns the turn on a deterministic
+      glitch, and the honest recovery is to hand the model a tool error so it
+      can re-emit the call.
+
+    Purely structural. A payload that stops on a dangling ``,`` / ``:``, or
+    that does not close on ``}`` / ``]`` at all, stopped mid-value. Beyond
+    that the reading depends on whether the quotes still make sense:
+
+    * **even number of unescaped quotes** → string boundaries are coherent, so
+      a string-aware depth scan is trustworthy; leftover depth means an
+      unclosed container, i.e. a truncation.
+    * **odd** → a quote was dropped or invented, which is the corruption
+      signature itself. Depth tracking past that point is meaningless (every
+      later brace is read as being inside a string), so a payload that closes
+      is taken at its word and called complete.
+    """
+    if not isinstance(raw, str):
+        return False
+    trimmed = raw.rstrip()
+    if not trimmed:
+        return False
+    if trimmed.endswith((",", ":")):
+        return True
+    if not trimmed.endswith(("}", "]")):
+        return True
+
+    depth = 0
+    quotes = 0
+    in_string = False
+    escaped = False
+    for ch in trimmed:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+                quotes += 1
+            continue
+        if ch == '"':
+            in_string = True
+            quotes += 1
+        elif ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+    if quotes % 2:
+        return False
+    return in_string or depth > 0
+
+
 def _requote_unquoted_string_values(raw: str) -> str:
     """Re-quote object values whose OPENING double quote was dropped.
 
@@ -580,6 +642,7 @@ __all__ = [
     "_sanitize_messages_surrogates",
     "_escape_invalid_chars_in_json_strings",
     "_repair_tool_call_arguments",
+    "tool_args_look_truncated",
     "_strip_non_ascii",
     "_sanitize_messages_non_ascii",
     "_sanitize_tools_non_ascii",

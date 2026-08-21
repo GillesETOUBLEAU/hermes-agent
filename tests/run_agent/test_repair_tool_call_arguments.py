@@ -2,6 +2,7 @@
 
 import json
 
+from agent.message_sanitization import tool_args_look_truncated
 from run_agent import _repair_tool_call_arguments
 
 
@@ -106,3 +107,48 @@ class TestDeQuotedValueRepair:
     def test_genuinely_truncated_still_unrepairable(self):
         # The new pass must not rescue a real truncation into bogus JSON.
         assert _repair_tool_call_arguments('{"truncated": "val', "t") == "{}"
+
+
+class TestToolArgsLookTruncated:
+    """Cut off mid-value vs complete-but-corrupt — the two need opposite
+    recoveries, so the discriminator is pinned in both directions."""
+
+    def test_unterminated_string_is_truncated(self):
+        assert tool_args_look_truncated('{"path": "/etc/ho')
+
+    def test_unclosed_object_is_truncated(self):
+        assert tool_args_look_truncated('{"a": 1, "b": {"c": 2}')
+
+    def test_unclosed_array_is_truncated(self):
+        assert tool_args_look_truncated('{"xs": [1, 2')
+
+    def test_dangling_separator_is_truncated(self):
+        assert tool_args_look_truncated('{"a": 1,')
+        assert tool_args_look_truncated('{"a":')
+
+    def test_corrupt_but_closed_is_not_truncated(self):
+        # The live glitch: complete payload, invalid JSON.
+        assert not tool_args_look_truncated('{"kind": needss_input"}')
+        # Missing colon — nothing can repair it, still not a truncation.
+        assert not tool_args_look_truncated('{"kind" "needs_input"}')
+
+    def test_valid_json_is_not_truncated(self):
+        assert not tool_args_look_truncated('{"kind": "needs_input"}')
+
+    def test_escaped_quote_does_not_fake_an_open_string(self):
+        assert not tool_args_look_truncated('{"reason": "say \\"hi\\""}')
+
+    def test_brace_inside_a_string_does_not_count(self):
+        assert not tool_args_look_truncated('{"reason": "use { and ["}')
+
+    def test_empty_is_not_truncated(self):
+        assert not tool_args_look_truncated("")
+        assert not tool_args_look_truncated("   ")
+
+    def test_dropped_quote_that_closes_is_corruption_not_truncation(self):
+        # Odd quote count: depth tracking is meaningless past the dropped
+        # quote, so a payload that still closes counts as complete.
+        assert not tool_args_look_truncated('{"kind": needss_input", "board": "wmh"}')
+
+    def test_nested_truncation_that_happens_to_end_on_a_brace(self):
+        assert tool_args_look_truncated('{"a": {"b": 1}')
