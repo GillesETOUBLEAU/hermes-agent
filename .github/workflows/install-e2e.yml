@@ -58,6 +58,12 @@ jobs:
   # by both route matrices, so the two routes cover the same set.
   pick-releases:
     name: Pick release tags
+    # Upstream-only. This is release QA for the `curl | install.sh` path, which
+    # nothing here uses: the fork ships through Railway's Dockerfile build, and
+    # its tag set is frozen at the five v2026.3.x tags copied at fork time, so
+    # every leg would test "install a March release, jump five months" -- a
+    # scenario no user of this fork is in. Same guard as contributor-check.yml.
+    if: github.repository == 'NousResearch/hermes-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -81,7 +87,9 @@ jobs:
 
   # `hermes update` -- the route most users take.
   update:
-    if: github.event_name != 'workflow_dispatch' || inputs.route != 'installer'
+    if: >-
+      github.repository == 'NousResearch/hermes-agent'
+      && (github.event_name != 'workflow_dispatch' || inputs.route != 'installer')
     needs: pick-releases
     strategy:
       # One release breaking is worth knowing about even if another already
@@ -97,7 +105,9 @@ jobs:
   # Re-running the curl one-liner over an existing checkout: autostash + pull
   # rather than the updater's own git handling.
   installer:
-    if: github.event_name != 'workflow_dispatch' || inputs.route != 'update'
+    if: >-
+      github.repository == 'NousResearch/hermes-agent'
+      && (github.event_name != 'workflow_dispatch' || inputs.route != 'update')
     needs: pick-releases
     strategy:
       fail-fast: false
