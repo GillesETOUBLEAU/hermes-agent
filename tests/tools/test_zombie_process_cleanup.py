@@ -472,7 +472,14 @@ class TestDelegationCleanup:
         parent._active_children.append(child)
         relay_host = MagicMock()
         monkeypatch.setattr(relay_runtime, "get_runtime", lambda **_kwargs: relay_host)
-        monkeypatch.setattr("tools.delegate_tool._get_child_timeout", lambda: 0.1)
+        # Long enough that the worker thread is certain to have started and
+        # registered its turn before the parent gives up on it — every
+        # assertion below is about what the parent does WHILE that turn is
+        # live, so a timeout racing thread start makes them meaningless.
+        # At 0.1s this failed intermittently on loaded CI runners: the OS had
+        # simply not scheduled the child yet, and `child_started` was unset
+        # through no fault of the code under test.
+        monkeypatch.setattr("tools.delegate_tool._get_child_timeout", lambda: 2.0)
 
         def run_conversation(**kwargs):
             lease = relay_runtime.SESSION_COORDINATOR.acquire_conversation(
