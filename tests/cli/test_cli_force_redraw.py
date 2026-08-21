@@ -418,6 +418,25 @@ class TestFocusRegainRedraw:
 
         assert calls == ["redraw"]
 
+    def test_first_redraw_fires_on_a_freshly_booted_machine(self, bare_cli, monkeypatch):
+        """The "never fired" sentinel must not read as a real timestamp.
+
+        time.monotonic() counts from boot on Linux, so a machine that has been
+        up for 30s reports 30.0. Against a 0.0 sentinel the first focus regain
+        looks 30s old and gets rate limited away — the repaint the user is
+        owed simply never happens. This is also why the 60s-interval test
+        below used to fail on CI runners younger than a minute.
+        """
+        import time as _time
+
+        calls = []
+        bare_cli._force_full_redraw = lambda: calls.append("redraw")
+        monkeypatch.setattr(_time, "monotonic", lambda: 30.0)
+
+        bare_cli._schedule_focus_regain_redraw(min_interval=60.0)
+
+        assert calls == ["redraw"]
+
     def test_focus_regain_redraw_fires_again_after_interval(self, bare_cli):
         calls = []
         bare_cli._force_full_redraw = lambda: calls.append("redraw")

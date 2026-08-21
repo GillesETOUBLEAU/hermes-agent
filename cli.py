@@ -5675,8 +5675,15 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         per ``min_interval`` seconds.
         """
         now = time.monotonic()
-        last = getattr(self, "_last_focus_regain_redraw", 0.0)
-        if now - last < min_interval:
+        # ``None``, not 0.0, for "never fired yet". time.monotonic() counts
+        # from boot on Linux, so on a freshly started machine `now` is itself
+        # a small number — compared against a 0.0 sentinel, the very first
+        # focus regain looks like it happened `now` seconds ago and gets rate
+        # limited away. Sub-second in practice at the 1.0s default, but it is
+        # the wrong answer, and it made the 60s-interval test fail whenever CI
+        # ran it within a minute of the runner booting.
+        last = getattr(self, "_last_focus_regain_redraw", None)
+        if last is not None and now - last < min_interval:
             return
         self._last_focus_regain_redraw = now
         self._force_full_redraw()
