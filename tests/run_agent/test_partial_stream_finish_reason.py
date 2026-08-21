@@ -789,3 +789,81 @@ class TestSendTimePadMultimodalSafety:
         assert out[2]["content"] == ""
         # input list untouched (repair is copy-on-write)
         assert api_messages[1]["content"] == ""
+
+
+# ── Complete-but-corrupt tool args are NOT a length truncation ─────────────
+
+class TestCorruptToolArgsAreNotTruncation:
+    """The provider finishes its message but hands back invalid argument JSON.
+
+    Observed live on z-ai/glm-5.2 via OpenRouter, which spliced its streamed
+    argument chunks one character off and emitted ``"kind": needss_input"``.
+    Stamping that as ``length`` made Hermes print "model hit max output
+    tokens" — with ~200 output tokens spent against a 131 072 cap — then burn
+    four retries at double the budget on a corruption no budget can fix, and
+    finally exit rc=0. A kanban worker that does this three times is given up
+    on with its deliverable already produced.
+
+    The provider's own finish_reason must survive, so the call reaches the
+    invalid-arguments path and earns a tool error the model can act on.
+    """
+
+    @staticmethod
+    def _stream_with_args(arguments: str, finish_reason: str):
+        def _gen():
+            yield _make_stream_chunk(tool_calls=[
+                _make_tool_call_delta(index=0, tc_id="call_z", name="kanban_block"),
+            ])
+            yield _make_stream_chunk(tool_calls=[
+                _make_tool_call_delta(index=0, arguments=arguments),
+            ])
+            yield _make_stream_chunk(finish_reason=finish_reason)
+        return _gen
+
+    def _run(self, mock_create, arguments, finish_reason):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = (
+            lambda *a, **kw: self._stream_with_args(arguments, finish_reason)()
+        )
+        mock_create.return_value = mock_client
+        agent = _make_agent()
+        agent._fire_stream_delta = lambda text: None
+        return agent._interruptible_streaming_api_call({})
+
+    @patch("run_agent.AIAgent._create_request_openai_client")
+    @patch("run_agent.AIAgent._close_request_openai_client")
+    def test_complete_but_unparseable_keeps_provider_finish_reason(
+        self, _mock_close, mock_create,
+    ):
+        # Missing colon: closes cleanly, no repair pass can fix it.
+        response = self._run(mock_create, '{"kind" "needs_input"}', "tool_calls")
+
+        assert response.choices[0].finish_reason == "tool_calls", (
+            "A complete-but-corrupt tool call must not be reported as an "
+            "output-length truncation — the budget is not the problem and "
+            "retrying at double the budget cannot help."
+        )
+        assert response.id != PARTIAL_STREAM_STUB_ID
+
+    @patch("run_agent.AIAgent._create_request_openai_client")
+    @patch("run_agent.AIAgent._close_request_openai_client")
+    def test_cut_off_args_still_report_length_despite_lying_router(
+        self, _mock_close, mock_create,
+    ):
+        # Routers rewrite "length" to "tool_calls"; the payload stops inside
+        # an unterminated string, so the structural check must catch it.
+        response = self._run(mock_create, '{"reason": "the report is rea', "tool_calls")
+
+        assert response.choices[0].finish_reason == FINISH_REASON_LENGTH, (
+            "A genuinely cut-off payload must keep routing to the "
+            "length-continuation handler even when the router hid it."
+        )
+
+    @patch("run_agent.AIAgent._create_request_openai_client")
+    @patch("run_agent.AIAgent._close_request_openai_client")
+    def test_provider_reported_length_is_always_honoured(
+        self, _mock_close, mock_create,
+    ):
+        response = self._run(mock_create, '{"kind" "needs_input"}', "length")
+
+        assert response.choices[0].finish_reason == FINISH_REASON_LENGTH

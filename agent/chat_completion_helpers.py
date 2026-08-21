@@ -42,6 +42,7 @@ from agent.message_metadata import append_message, stamp_message_timestamp
 from agent.message_sanitization import (
     _sanitize_surrogates,
     _repair_tool_call_arguments,
+    tool_args_look_truncated,
 )
 from agent.reasoning_summaries import separate_glued_reasoning_blocks
 from agent.stream_single_writer import claim_stream_writer, stream_writer_is_current
@@ -4312,6 +4313,10 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
         full_content = "".join(content_parts) or None
         mock_tool_calls = None
         has_truncated_tool_args = False
+        # Raw payloads of every tool call whose arguments could not be parsed
+        # or repaired — inspected below to tell a cut-off stream apart from a
+        # complete-but-corrupt one.
+        broken_arg_payloads: list[str] = []
         if tool_calls_acc:
             mock_tool_calls = []
             for idx in sorted(tool_calls_acc):
@@ -4336,6 +4341,7 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
                         else:
                             # Unrepairable — flag for truncation handling
                             has_truncated_tool_args = True
+                            broken_arg_payloads.append(arguments)
                 elif finish_reason is None:
                     # Stream ended with no finish_reason AND this tool call's
                     # arguments never received a single byte (name arrived,
@@ -4435,7 +4441,38 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
 
         effective_finish_reason = finish_reason or "stop"
         if has_truncated_tool_args:
-            effective_finish_reason = "length"
+            # Unparseable arguments are not automatically a TRUNCATION. Stamp
+            # "length" only when the model really did run out of room:
+            #
+            #   * the provider said so itself, or
+            #   * the payload stops mid-value (routers do rewrite "length" to
+            #     "tool_calls", hiding a real cut-off from the length handler).
+            #
+            # A payload that closes cleanly but is still invalid JSON is a
+            # provider corrupting its own tool call — z-ai/glm-5.2 via
+            # OpenRouter emitted `"kind": needss_input"` with ~200 output
+            # tokens against a 131 072 cap. Calling that "max output tokens"
+            # sends the operator hunting a budget problem that does not exist,
+            # and the loop's response — four retries at double the budget —
+            # cannot possibly help. Leave the provider's own finish_reason in
+            # place so the call reaches dispatch, where invalid arguments earn
+            # an honest tool error the model can act on.
+            if finish_reason == "length" or any(
+                tool_args_look_truncated(p) for p in broken_arg_payloads
+            ):
+                effective_finish_reason = "length"
+            else:
+                logger.warning(
+                    "Provider returned complete but unparseable tool_call "
+                    "arguments (finish_reason=%r, tools=%s); routing to the "
+                    "invalid-arguments path instead of the truncation "
+                    "handler.",
+                    finish_reason,
+                    [
+                        (tool_calls_acc[i]["function"]["name"] or "?")
+                        for i in sorted(tool_calls_acc)
+                    ],
+                )
 
         provider_stream_error = _provider_stream_error_from_text(
             full_content or "",

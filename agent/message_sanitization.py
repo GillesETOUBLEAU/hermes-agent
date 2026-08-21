@@ -183,6 +183,146 @@ def _escape_invalid_chars_in_json_strings(raw: str) -> str:
     return "".join(out)
 
 
+def tool_args_look_truncated(raw: str) -> bool:
+    """True when malformed argument JSON looks CUT OFF rather than corrupted.
+
+    The distinction decides how the caller recovers, so getting it wrong is
+    expensive in both directions:
+
+    * cut off (``{"path": "/etc/ho``) → the model never finished writing.
+      Re-asking with a bigger output budget is the right move.
+    * complete but corrupt (``{"kind": needss_input"}`` — a provider that
+      spliced its streamed chunks one char off) → the model DID finish. The
+      budget is irrelevant; retrying it burns the turn on a deterministic
+      glitch, and the honest recovery is to hand the model a tool error so it
+      can re-emit the call.
+
+    Purely structural. A payload that stops on a dangling ``,`` / ``:``, or
+    that does not close on ``}`` / ``]`` at all, stopped mid-value. Beyond
+    that the reading depends on whether the quotes still make sense:
+
+    * **even number of unescaped quotes** → string boundaries are coherent, so
+      a string-aware depth scan is trustworthy; leftover depth means an
+      unclosed container, i.e. a truncation.
+    * **odd** → a quote was dropped or invented, which is the corruption
+      signature itself. Depth tracking past that point is meaningless (every
+      later brace is read as being inside a string), so a payload that closes
+      is taken at its word and called complete.
+    """
+    if not isinstance(raw, str):
+        return False
+    trimmed = raw.rstrip()
+    if not trimmed:
+        return False
+    if trimmed.endswith((",", ":")):
+        return True
+    if not trimmed.endswith(("}", "]")):
+        return True
+
+    depth = 0
+    quotes = 0
+    in_string = False
+    escaped = False
+    for ch in trimmed:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+                quotes += 1
+            continue
+        if ch == '"':
+            in_string = True
+            quotes += 1
+        elif ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+    if quotes % 2:
+        return False
+    return in_string or depth > 0
+
+
+def _requote_unquoted_string_values(raw: str) -> str:
+    """Re-quote object values whose OPENING double quote was dropped.
+
+    Some providers splice streamed tool-call argument chunks one character
+    off at a delta boundary, which eats the opening quote of a string value
+    (and can duplicate a neighbouring char).  Observed live on z-ai/glm-5.2
+    via OpenRouter, which emitted ``"kind": needss_input"`` instead of
+    ``"kind": "needs_input"`` on 77 consecutive ``kanban_block`` calls — a
+    complete, non-truncated payload that no other repair pass can fix,
+    because a bareword followed by a stray closing quote is simply not JSON.
+
+    Walks the raw string tracking string context, so a ``:`` *inside* a
+    value ("note: see below") is never mistaken for a key/value separator.
+    On a value position holding a bareword — followed either by the stray
+    closing quote or by a plain ``,`` / ``}`` — the missing quotes are put
+    back.  ``true`` / ``false`` / ``null`` are left alone.
+
+    Returns ``raw`` unchanged when nothing matched; the caller re-parses and
+    discards the result if the repair did not produce valid JSON.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(raw)
+    in_string = False
+    escaped = False
+    changed = False
+    while i < n:
+        ch = raw[i]
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch != ":":
+            out.append(ch)
+            i += 1
+            continue
+        # Value position: emit the separator plus any padding whitespace,
+        # then decide whether what follows is a de-quoted string.
+        out.append(ch)
+        i += 1
+        j = i
+        while j < n and raw[j] in " \t\r\n":
+            j += 1
+        out.append(raw[i:j])
+        i = j
+        if i >= n or not (raw[i].isalpha() or raw[i] == "_"):
+            continue
+        k = i
+        while k < n and (raw[k].isalnum() or raw[k] in "_- ."):
+            k += 1
+        word = raw[i:k].rstrip()
+        if not word or word in ("true", "false", "null"):
+            continue
+        tail = raw[k] if k < n else ""
+        if tail == '"':
+            # Dropped opening quote, stray closing quote survived.
+            out.append('"' + word + '"')
+            i = k + 1
+            changed = True
+        elif tail in (",", "}"):
+            # Both quotes dropped.
+            out.append('"' + word + '"')
+            i = k
+            changed = True
+    return "".join(out) if changed else raw
+
+
 # When a repair is about to destroy the only copy of a tool call's original
 # argument bytes (rewriting them to "{}"), the WARNING log is the last
 # surviving copy of content that can hold real user data (#80498). Bound the
@@ -278,6 +418,23 @@ def _repair_tool_call_arguments(raw_args: str, tool_name: str = "?") -> str:
             return escaped
     except (json.JSONDecodeError, TypeError, ValueError):
         pass
+
+    # Repair pass 5: a value whose opening quote was dropped by a provider
+    # that spliced its streamed argument chunks one char off. Runs last
+    # because it is the only pass that INSERTS characters into a value, and
+    # the result is discarded unless it parses.
+    for _candidate in (fixed, raw_stripped):
+        try:
+            requoted = _requote_unquoted_string_values(_candidate)
+            if requoted != _candidate:
+                json.loads(requoted)
+                logger.warning(
+                    "Repaired de-quoted tool_call argument value for %s: %s → %s",
+                    tool_name, raw_stripped[:80], requoted[:80],
+                )
+                return requoted
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
 
     # Last resort: replace with empty object so the API request doesn't
     # crash the entire session. Log the FULL original string (bounded) —
@@ -485,6 +642,7 @@ __all__ = [
     "_sanitize_messages_surrogates",
     "_escape_invalid_chars_in_json_strings",
     "_repair_tool_call_arguments",
+    "tool_args_look_truncated",
     "_strip_non_ascii",
     "_sanitize_messages_non_ascii",
     "_sanitize_tools_non_ascii",

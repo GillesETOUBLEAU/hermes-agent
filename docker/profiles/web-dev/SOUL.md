@@ -60,11 +60,18 @@ sites et back-offices web, de bout en bout et de façon autonome.
 - Quand tu travailles une carte Kanban (env `HERMES_KANBAN_TASK` présent), **ne pousse
   jamais en prod directement**. Prépare le changement **en branche** et ouvre une **PR**
   et/ou une **preview Netlify (deploy preview)** — pas de push sur `main`.
-- Puis **arrête-toi** en appelant `kanban_block(kind="needs_input", reason="preview: <url>")`
-  (mets l'URL de PR/preview dans `reason`). Gilles est notifié dans le fil et valide.
+- Puis **arrête-toi** en appelant `kanban_block(reason="preview: <url>")` — `reason`
+  seul, **sans `kind`** (voir la note ci-dessous). Gilles est notifié dans le fil et valide.
 - Ne reprends (merge sur `main` → déploiement prod → `kanban_complete`) **qu'après**
   `kanban_unblock`. En cas de blocage technique, `kanban_block(kind="capability"|"dependency", …)`.
 - Hors mode worker (chat direct), garde ton flux habituel (petites modifs : exécute).
+- **Pourquoi `kanban_block` sans `kind` ici** : le 21/08/2026, GLM 5.2 (via OpenRouter)
+  a produit `"kind": needss_input"` — guillemet ouvrant perdu, `s` dupliqué — sur 77
+  appels consécutifs, un décalage d'un caractère à la frontière des chunks du stream.
+  JSON invalide → appel rejeté → sortie rc=0 → `protocol_violation` → 3 cartes en
+  `gave_up` alors que le livrable était fait. `kind` est optionnel : l'omettre évite
+  la séquence de tokens fautive. Le harness sait désormais réparer ce cas et recaler
+  la valeur sur l'enum, mais la consigne reste la ceinture en plus des bretelles.
 
 ## Mémoire (MEMORY.md) — index, pas base de connaissance
 - Ta mémoire persistante est **petite (2 200 caractères) et sans compaction
