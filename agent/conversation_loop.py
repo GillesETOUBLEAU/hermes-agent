@@ -755,6 +755,10 @@ def _billing_failure_result(
         "failed": True,
         "error": summary,
         "failure_reason": classified.reason.value,
+        # The classifier's own retry verdict — carried so UI surfaces
+        # (agent/error_surface.py) show Retry only when a re-run can differ,
+        # instead of re-deriving retryability from a second taxonomy.
+        "failure_retryable": bool(classified.retryable),
         # The billing verdict may rest on an ambiguous body (#82154) — carry
         # that through the structured result, not just the prose.
         "billing_unverified": unverified,
@@ -1820,31 +1824,6 @@ def run_conversation(
     agent._last_compression_attempt_recorded = False
     agent._last_compression_attempt_in_place = None
 
-    # If a background memory/skill review spawned at the end of a PRIOR turn
-    # (agent/background_review.py) is still running its own run_conversation()
-    # when THIS turn starts, cancel it now rather than letting both make
-    # outbound API calls concurrently against the same session_id/credentials.
-    # That concurrency can produce doubled prompt-token accounting on this
-    # turn's own calls and, because the review fork is a fully separate
-    # AIAgent with no route back to THIS agent's interrupt() by default, a
-    # lockup that survives a normal /stop and needs a hard Ctrl+C.
-    # ``review_agent.interrupt()`` is fire-and-forget here — it just flags
-    # cancellation and aborts the review's in-flight socket; it does not
-    # block waiting for the review's daemon thread to exit, so it can't add
-    # latency to this turn. Only ever set on the real owning agent (the
-    # review fork's own copy of this attribute stays None — reviews don't
-    # spawn nested reviews), so this is a no-op on every other run_conversation
-    # caller (subagents, the review fork itself, etc).
-    _pending_review = getattr(agent, "_background_review_agent", None)
-    if _pending_review is not None:
-        try:
-            _pending_review.interrupt("superseded by a new live turn")
-        except Exception:
-            logger.debug(
-                "Failed to cancel in-flight background review for a new turn",
-                exc_info=True,
-            )
-
     # Adopt any ~/.hermes/.env credential/base-url edits made since the last
     # turn — a Settings save updates .env but not this worker's client, which
     # was built at agent init (#67821). No-op when .env is unchanged.
@@ -2765,7 +2744,34 @@ def run_conversation(
                     request_pressure_tokens,
                     int(getattr(_compressor, "threshold_tokens", 0) or 0),
                 )
-        
+        elif not agent.compression_enabled and len(messages) > 1:
+            # Uncompressed session guard (#89297): compression is disabled, so
+            # nothing shrinks a growing session. Reuse the unconditionally
+            # computed request estimate (zero marginal cost — this site runs
+            # before every provider request, covering turn-start AND mid-turn
+            # tool-result growth) and surface a deduped, actionable warning
+            # when the request exceeds the model context window. The dedup is
+            # re-armed by the turn-context preflight once the session is back
+            # under the window (manual /compress works with compression
+            # disabled), so the guard warns again on a later re-overflow.
+            # context_compressor always exists (agent_init constructs it even
+            # when compression is disabled) and its context_length property
+            # hard-floors at a positive default — no metadata re-resolution
+            # needed here.
+            _ctx_len = getattr(
+                getattr(agent, "context_compressor", None), "context_length", None
+            )
+            if (
+                isinstance(_ctx_len, int)
+                and _ctx_len > 0
+                and request_pressure_tokens > _ctx_len
+            ):
+                _warn_fn = getattr(
+                    agent, "_warn_uncompressed_context_overflow", None
+                )
+                if callable(_warn_fn):
+                    _warn_fn(request_pressure_tokens, _ctx_len)
+
         # Thinking spinner for quiet mode (animated during API call)
         thinking_spinner = None
         
@@ -6437,6 +6443,9 @@ def run_conversation(
                         # different exit code. ``rate_limit`` / ``billing`` here
                         # mean "quota wall, not a task error".
                         "failure_reason": classified.reason.value,
+                        # The classifier's own retry verdict — UI surfaces use
+                        # this instead of re-deriving from the reason string.
+                        "failure_retryable": bool(classified.retryable),
                         # True when the billing verdict rests on an ambiguous
                         # body (#82154) — may be a content-filter rejection.
                         "billing_unverified": _billing_unverified,
