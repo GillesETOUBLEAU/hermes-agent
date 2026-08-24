@@ -475,6 +475,113 @@ def test_active_pr_guard_skipped_for_review_lane_but_defers_ready_lane(
         ) == "rate_limit_cooldown"
 
 
+def test_active_pr_guard_bypassed_by_explicit_unblock(
+    kanban_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator unblock AFTER the PR comment lifts the active_pr guard.
+
+    The canonical handoff — worker opens a PR, comments its URL, calls
+    ``block_task(needs_input)``, operator answers and unblocks — must leave
+    the task spawnable. Before the bypass, the unblock lifted
+    ``recent_success`` but the fresh PR-URL comment re-deferred the spawn
+    every tick for up to 24h, parking the task in ``ready`` while the
+    dispatcher logged a misleading venv/PATH/credentials warning.
+    """
+    import hermes_cli.profiles as profmod
+
+    monkeypatch.setattr(profmod, "profile_exists", lambda name: True)
+    pr_comment = "Opened https://github.com/example/repo/pull/7 — need a Go."
+
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="ship lot 0", assignee="web-dev")
+        claimed = kb.claim_task(conn, tid)
+        assert claimed is not None
+        kb.add_comment(conn, tid, author="worker", body=pr_comment)
+        assert kb.block_task(
+            conn, tid, reason=f"needs approval: {pr_comment}",
+            kind="needs_input", expected_run_id=claimed.current_run_id,
+        )
+        # Blocked: not in the ready lane at all; the guard question is moot
+        # until the unblock below returns the task to ready.
+        assert kb.unblock_task(conn, tid)
+        assert kb.get_task(conn, tid).status == "ready"
+
+        # The explicit unblock (an operator's deliberate "run it again")
+        # must lift the active_pr guard.
+        assert kb.check_respawn_guard(conn, tid) is None
+
+
+def test_active_pr_guard_not_lifted_by_automatic_reclaim(
+    kanban_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crash reclaim after a PR comment must NOT lift the active_pr guard.
+
+    Worker opens a PR then crashes → the stale-claim reclaim requeues the
+    task automatically. Respawning would risk a duplicate PR — the exact
+    scenario the guard exists for — so ``reclaimed`` is deliberately absent
+    from the bypass set (unlike the ``recent_success`` bypass).
+    """
+    import hermes_cli.profiles as profmod
+
+    monkeypatch.setattr(profmod, "profile_exists", lambda name: True)
+
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="crashy", assignee="web-dev")
+        kb.add_comment(
+            conn, tid, author="worker",
+            body="WIP: https://github.com/example/repo/pull/8",
+        )
+        with kb.write_txn(conn):
+            kb._append_event(conn, tid, "reclaimed", {"note": "worker died"})
+
+        assert kb.check_respawn_guard(conn, tid) == "active_pr"
+
+
+def test_active_pr_guard_rearms_on_new_pr_comment_after_unblock(
+    kanban_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PR-URL comment NEWER than the unblock re-arms the guard.
+
+    The bypass only honours re-queue events that come after the newest PR
+    comment — a fresh PR link posted after the unblock is a new
+    duplicate-work signal and must defer again.
+    """
+    import time as _time
+
+    import hermes_cli.profiles as profmod
+
+    monkeypatch.setattr(profmod, "profile_exists", lambda name: True)
+
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="two rounds", assignee="web-dev")
+        claimed = kb.claim_task(conn, tid)
+        assert claimed is not None
+        kb.add_comment(
+            conn, tid, author="worker",
+            body="see https://github.com/example/repo/pull/9",
+        )
+        assert kb.block_task(
+            conn, tid, kind="needs_input",
+            expected_run_id=claimed.current_run_id,
+        )
+        assert kb.unblock_task(conn, tid)
+        assert kb.check_respawn_guard(conn, tid) is None
+
+        # New PR comment strictly after the unblock event (explicit
+        # created_at avoids same-second tie with the unblock timestamp).
+        with kb.write_txn(conn):
+            conn.execute(
+                "INSERT INTO task_comments (task_id, author, body, created_at) "
+                "VALUES (?, 'worker', ?, ?)",
+                (
+                    tid,
+                    "follow-up https://github.com/example/repo/pull/10",
+                    int(_time.time()) + 5,
+                ),
+            )
+        assert kb.check_respawn_guard(conn, tid) == "active_pr"
+
+
 def test_review_dispatch_preserves_task_skills_and_adds_reviewer_skill(
     kanban_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

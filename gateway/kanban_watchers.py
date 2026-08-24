@@ -1707,7 +1707,12 @@ class GatewayKanbanWatchersMixin:
                         await asyncio.to_thread(_auto_decompose_tick, _ad_per_tick)
                     results = await asyncio.to_thread(_tick_once)
                     any_spawned = False
+                    last_guarded = []
                     for slug, res in (results or []):
+                        for tid, reason in (
+                            getattr(res, "respawn_guarded", None) or []
+                        ):
+                            last_guarded.append((slug, tid, reason))
                         if res is not None and getattr(res, "spawned", None):
                             any_spawned = True
                             # Quiet by default — only log when something actually
@@ -1732,13 +1737,41 @@ class GatewayKanbanWatchersMixin:
                 if bad_ticks >= HEALTH_WINDOW:
                     now = int(time.time())
                     if now - last_warn_at >= 300:
-                        logger.warning(
-                            "kanban dispatcher stuck: ready queue non-empty for "
-                            "%d consecutive ticks but 0 workers spawned. Check "
-                            "profile health (venv, PATH, credentials) and "
-                            "`hermes kanban list --status ready`.",
-                            bad_ticks,
-                        )
+                        if last_guarded:
+                            # The queue is held by respawn guards, not by a
+                            # broken environment — say so, or operators chase
+                            # venv/PATH/credential ghosts while a guard (e.g.
+                            # active_pr) is deliberately deferring the spawn.
+                            guard_detail = ", ".join(
+                                f"{tid}={reason}"
+                                if slug in ("", "default", None)
+                                else f"{slug}/{tid}={reason}"
+                                for slug, tid, reason in last_guarded[:10]
+                            )
+                            if len(last_guarded) > 10:
+                                guard_detail += (
+                                    f", … (+{len(last_guarded) - 10} more)"
+                                )
+                            logger.warning(
+                                "kanban dispatcher stuck: ready queue non-empty "
+                                "for %d consecutive ticks but 0 workers spawned. "
+                                "%d task(s) held by respawn guards: %s. See "
+                                "`hermes kanban tail <task>` for the guard "
+                                "events; a guard defers the spawn on purpose "
+                                "(duplicate-PR / recent-success / auth-blocker "
+                                "protection).",
+                                bad_ticks,
+                                len(last_guarded),
+                                guard_detail,
+                            )
+                        else:
+                            logger.warning(
+                                "kanban dispatcher stuck: ready queue non-empty "
+                                "for %d consecutive ticks but 0 workers spawned. "
+                                "Check profile health (venv, PATH, credentials) "
+                                "and `hermes kanban list --status ready`.",
+                                bad_ticks,
+                            )
                         last_warn_at = now
             except asyncio.CancelledError:
                 logger.debug("kanban dispatcher: cancelled")
