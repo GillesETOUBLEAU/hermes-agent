@@ -4,9 +4,9 @@
 # Netlify via CLI (installé dans l'image), auth NETLIFY_AUTH_TOKEN.
 # Les ${VAR} sont interpolées depuis l'environnement du process (injecté par Railway).
 
-# Modèle par défaut : Z.AI GLM 5.2 (via OpenRouter, OPENROUTER_API_KEY).
+# Modèle par défaut : Z.AI GLM 5.3 Flash (via OpenRouter, OPENROUTER_API_KEY).
 model:
-  default: "z-ai/glm-5.2"
+  default: "z-ai/glm-5.3-flash"
   provider: "openrouter"
 
 # Bascule automatique mi-session si OpenRouter sature : Opus 5 en direct sur
