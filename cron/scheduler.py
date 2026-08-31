@@ -640,6 +640,7 @@ _LEGACY_HOME_TARGET_ENV_VARS = {
 }
 
 from cron.jobs import (
+    _ensure_cron_dir,
     advance_next_runs,
     claim_dispatch,
     claim_job_for_fire,
@@ -971,7 +972,7 @@ def _record_forced_release(job_id: str, name: str, age_seconds: float, allowance
         del _forced_releases[:-_FORCED_RELEASE_HISTORY]
     try:
         path = _get_hermes_home() / "cron" / "inflight_forced_releases.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_cron_dir(path.parent)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry) + "\n")
     except Exception as e:  # never let telemetry break a tick
@@ -1512,7 +1513,7 @@ def _write_usage_audit(record: dict) -> None:
     """
     try:
         path = _usage_audit_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_cron_dir(path.parent)
         line = json.dumps(record, ensure_ascii=False)
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -2300,10 +2301,30 @@ def _get_config_home_channel(platform_name: str):
 
 
 def _env_home_target_chat_id(platform_name: str) -> str:
-    """Return the home chat id from the legacy env mirror only (no config)."""
+    """Return the home chat id from the legacy env mirror only (no config).
+
+    Reads through ``get_secret`` (not raw ``os.getenv``) so a profile-scoped
+    secret scope wins in a multiplex gateway. ``DISCORD_HOME_CHANNEL`` lives in
+    each profile's ``.env``; in a multiplex process the winning cron tick runs
+    with the job-owning profile's scope installed (run_one_job sets it), so
+    reading via ``get_secret`` resolves the OWNING profile's chat id rather
+    than the host process's ``os.environ`` (#83182, chat-id leg — the token
+    leg was fixed earlier; chat id / thread id resolve through the same leak).
+    """
     env_var = _resolve_home_env_var(platform_name)
     if not env_var:
         return ""
+    try:
+        from agent.secret_scope import get_secret
+    except Exception:
+        get_secret = None  # type: ignore
+    if get_secret is not None:
+        value = get_secret(env_var, "")
+        if not value:
+            legacy = _LEGACY_HOME_TARGET_ENV_VARS.get(env_var)
+            if legacy:
+                value = get_secret(legacy, "")
+        return value or ""
     value = os.getenv(env_var, "")
     if not value:
         legacy = _LEGACY_HOME_TARGET_ENV_VARS.get(env_var)
@@ -2340,15 +2361,33 @@ def _get_home_target_thread_id(platform_name: str) -> Optional[str]:
     without changing the lobby invariant.
     """
     env_var = _resolve_home_env_var(platform_name)
+    try:
+        from agent.secret_scope import get_secret
+    except Exception:
+        get_secret = None  # type: ignore
+
+    def _scope_get(name: str) -> str:
+        if get_secret is None:
+            return ""
+        v = get_secret(name, "")
+        return v if v is not None else ""
+
     if platform_name.lower() == "telegram":
-        cron_thread = os.getenv("TELEGRAM_CRON_THREAD_ID", "").strip()
+        cron_thread = _scope_get("TELEGRAM_CRON_THREAD_ID").strip()
         if cron_thread:
             return cron_thread
-    value = os.getenv(f"{env_var}_THREAD_ID", "").strip() if env_var else ""
-    if not value and env_var:
-        legacy = _LEGACY_HOME_TARGET_ENV_VARS.get(env_var)
-        if legacy:
-            value = os.getenv(f"{legacy}_THREAD_ID", "").strip()
+    if get_secret is not None:
+        value = _scope_get(f"{env_var}_THREAD_ID").strip() if env_var else ""
+        if not value and env_var:
+            legacy = _LEGACY_HOME_TARGET_ENV_VARS.get(env_var)
+            if legacy:
+                value = _scope_get(f"{legacy}_THREAD_ID").strip()
+    else:
+        value = os.getenv(f"{env_var}_THREAD_ID", "").strip() if env_var else ""
+        if not value and env_var:
+            legacy = _LEGACY_HOME_TARGET_ENV_VARS.get(env_var)
+            if legacy:
+                value = os.getenv(f"{legacy}_THREAD_ID", "").strip()
     if value:
         return value
     # Canonical config.yaml fallback — same rationale as
@@ -3270,8 +3309,26 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
             pconfig = transport.config
             runtime_adapter = transport.adapter
         else:
-            # No live transport: preserve the existing standalone delivery path,
-            # which uses the logical platform's configured credential.
+            # No live transport. A relay-fronted platform's ONLY sender is the
+            # gateway's live relay adapter — there is no standalone fallback
+            # (the connector owns the credential). A manual in-process run
+            # (`hermes cron run`) has no live relay adapter, so surface the
+            # accurate remediation instead of the native configured/enabled
+            # gate, which misdiagnoses relay-fronted deployments.
+            from gateway.relay import relay_fronted_platforms
+
+            if platform_name in relay_fronted_platforms():
+                msg = (
+                    f"platform '{platform_name}' is relay-fronted and has no "
+                    "live gateway transport; start the gateway (its ticker "
+                    "owns relay-fronted delivery and will fire the job on "
+                    "schedule)"
+                )
+                logger.warning("Job '%s': %s", job["id"], msg)
+                delivery_errors.append(msg)
+                continue
+            # Preserve the existing standalone delivery path, which uses the
+            # logical platform's configured credential.
             pconfig = config.platforms.get(platform)
             runtime_adapter = None
 
@@ -3984,6 +4041,40 @@ def _get_media_send_timeout() -> int:
     return _DEFAULT_MEDIA_SEND_TIMEOUT
 
 
+def _get_session_db_timeout() -> float:
+    """Resolve the bound on run_job's SessionDB init from env/config.
+
+    Mirrors the ``script_timeout_seconds`` resolution pattern: the
+    HERMES_CRON_SESSION_DB_TIMEOUT env var wins, then
+    ``cron.session_db_timeout_seconds`` in config.yaml (present in
+    DEFAULT_CONFIG, so ``load_config()``'s deep-merge supplies it), then
+    10s. Unlike the sibling timeouts, 0 is meaningful (unlimited — legacy
+    behavior, opt-in for debugging), so values are passed through untouched.
+    """
+    env_value = os.getenv("HERMES_CRON_SESSION_DB_TIMEOUT", "").strip()
+    if env_value:
+        try:
+            return float(env_value)
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid HERMES_CRON_SESSION_DB_TIMEOUT=%r; using config/default",
+                env_value,
+            )
+
+    try:
+        cfg = load_config() or {}
+        cron_cfg = cfg.get("cron", {}) if isinstance(cfg, dict) else {}
+        configured = cron_cfg.get("session_db_timeout_seconds")
+        if configured is not None:
+            return float(configured)
+    except Exception as exc:
+        logger.debug(
+            "Failed to load cron.session_db_timeout_seconds from config: %s", exc
+        )
+
+    return 10.0
+
+
 def _read_windows_pyvenv_cfg(venv_dir: Path) -> dict[str, str]:
     cfg_path = venv_dir / "pyvenv.cfg"
     try:
@@ -4258,7 +4349,7 @@ def _run_job_script(
         LLM can report the problem to the user.
     """
     scripts_dir = _get_hermes_home() / "scripts"
-    scripts_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_cron_dir(scripts_dir)
     scripts_dir_resolved = scripts_dir.resolve()
 
     # Same ingestion contract as cron.lifecycle_guard._expand_candidate_path:
@@ -5093,6 +5184,66 @@ def _preflight_check_provider_key(job: dict, cfg: dict) -> Optional[str]:
     return None
 
 
+def _delivery_platform_routed_from_primary_gateway(platform_name: str) -> bool:
+    """True when the primary gateway routes this platform to the profile the
+    scheduler is currently serving.
+
+    Under ``gateway.multiplex_profiles`` a satellite profile's cron jobs are
+    ticked by the primary gateway's in-process ticker (#69377) and delivered
+    through the primary gateway's live adapters — the satellite home never
+    holds the platform credentials itself (giving it a token of its own is a
+    ``duplicate_credential`` fatal). ``_preflight_check_delivery`` loads the
+    gateway config of the job's OWN home, where such a platform correctly
+    reads as unconnected; consulting the primary home's ``profile_routes``
+    keeps routed satellite jobs from being permanently false-blocked (#97476).
+    Reads the primary config.yaml directly (both the top-level and nested
+    ``gateway.`` forms) instead of ``load_gateway_config()`` so no primary
+    platform config leaks into this process's environment.
+    """
+    try:
+        from hermes_constants import get_default_hermes_root, get_hermes_home
+
+        primary_home = get_default_hermes_root()
+        current_home = Path(get_hermes_home())
+        if (
+            primary_home.expanduser().resolve(strict=False)
+            == current_home.expanduser().resolve(strict=False)
+        ):
+            return False  # this IS the primary home — nothing to consult
+        config_path = primary_home.expanduser() / "config.yaml"
+        if not config_path.exists():
+            return False
+
+        import yaml
+
+        with open(config_path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        routes_raw = raw.get("profile_routes")
+        if routes_raw is None and isinstance(raw.get("gateway"), dict):
+            routes_raw = raw["gateway"].get("profile_routes")
+        if not isinstance(routes_raw, list):
+            return False
+
+        from gateway.profile_routing import parse_profile_routes
+        from hermes_cli.profiles import profile_matches_home
+
+        platform_key = platform_name.lower()
+        for route in parse_profile_routes(routes_raw):
+            if (
+                route.enabled
+                and str(route.platform).lower() == platform_key
+                and profile_matches_home(route.profile)
+            ):
+                return True
+        return False
+    except Exception:
+        logger.debug(
+            "preflight: primary-gateway profile-route lookup unavailable",
+            exc_info=True,
+        )
+        return False
+
+
 def _preflight_check_delivery(job: dict) -> Optional[str]:
     """Check the job's delivery target(s) resolve to configured platforms.
 
@@ -5144,6 +5295,12 @@ def _preflight_check_delivery(job: dict) -> Optional[str]:
                 )
                 return None  # fail-open
         if platform_name.lower() not in connected:
+            # Multiplex escape hatch: a satellite profile whose deliveries
+            # are routed by the primary gateway's profile_routes is served
+            # by the primary's adapters, so its own unconnected reading is
+            # a false block (#97476).
+            if _delivery_platform_routed_from_primary_gateway(platform_name):
+                continue
             return (
                 f"delivery platform '{platform_name}' has no gateway "
                 "credentials configured (not connected). Configure it via "
@@ -5602,81 +5759,12 @@ def run_job(
     # ---------------------------------------------------------------
     from run_agent import AIAgent
 
-    # Initialize SQLite session store so cron job messages are persisted
-    # and discoverable via session_search (same pattern as gateway/run.py).
-    #
-    # Bounded with its own timeout (separate from HERMES_CRON_TIMEOUT, which
-    # only watches the agent's run_conversation below): SessionDB.__init__
-    # opens/migrates state.db synchronously and has no timeout of its own
-    # against a wedged sqlite3.connect (e.g. a stale flock left by a crashed
-    # sibling process). An unbounded hang here is invisible to every other
-    # cron safeguard, because it happens BEFORE _submit_with_guard's future
-    # exists — the finally block that releases the job from
-    # _running_job_ids never runs, so the job stays wedged "running" until
-    # the whole gateway process is restarted, silently skipping every
-    # scheduled fire in between with "already running — skipping".
-    _session_db = None
-    try:
-        from hermes_state import SessionDB
-
-        # Resolve timeout: env override → config.yaml → default 10s.
-        # Mirrors the script_timeout_seconds resolution pattern.
-        _session_db_timeout: float | None = None
-        _raw_env_timeout = os.getenv("HERMES_CRON_SESSION_DB_TIMEOUT", "").strip()
-        if _raw_env_timeout:
-            try:
-                _session_db_timeout = float(_raw_env_timeout)
-            except (ValueError, TypeError):
-                logger.warning(
-                    "Invalid HERMES_CRON_SESSION_DB_TIMEOUT=%r; using config/default",
-                    _raw_env_timeout,
-                )
-        if _session_db_timeout is None:
-            try:
-                from hermes_cli.config import load_config
-                _cfg = load_config() or {}
-                _cron_cfg = _cfg.get("cron", {}) if isinstance(_cfg, dict) else {}
-                _configured = _cron_cfg.get("session_db_timeout_seconds")
-                if _configured is not None:
-                    _session_db_timeout = float(_configured)
-            except Exception as exc:
-                logger.debug(
-                    "Failed to load cron.session_db_timeout_seconds from config: %s",
-                    exc,
-                )
-        if _session_db_timeout is None:
-            _session_db_timeout = 10.0
-
-        if _session_db_timeout > 0:
-            _session_db_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            _session_db_future = _session_db_pool.submit(SessionDB)
-            try:
-                _session_db = _session_db_future.result(timeout=_session_db_timeout)
-            except concurrent.futures.TimeoutError:
-                # The worker is abandoned (shutdown below doesn't wait for it).
-                # If SessionDB() later completes inside it, the future's result
-                # would be orphaned and its SQLite FDs (.db, WAL, SHM) leak
-                # until process exit.  Register a done-callback that retrieves
-                # and closes any eventual late result (#72782).
-                _session_db_future.add_done_callback(_close_late_session_db_result)
-                raise
-            finally:
-                # Don't wait for a wedged connect() to unwind — abandon the
-                # worker thread (same pattern as the agent inactivity timeout
-                # further down) rather than blocking shutdown on it too.
-                _session_db_pool.shutdown(wait=False)
-        else:
-            # 0 = unlimited (legacy behavior, opt-in for debugging)
-            _session_db = SessionDB()
-    except concurrent.futures.TimeoutError:
-        logger.error(
-            "Job '%s': SessionDB init did not return within %.0fs — proceeding "
-            "without a session store for this run instead of blocking it "
-            "forever",
-            job.get("id", "?"), _session_db_timeout,
-        )
-    except Exception as e:
-        logger.debug("Job '%s': SQLite session store not available: %s", job.get("id", "?"), e)
+    # NOTE: the SQLite session store used to be initialized here, BEFORE the
+    # wake-gate and prompt-validation early returns below. Every gated run
+    # (``wakeAgent: false``, blocked prompt) opened state.db and returned
+    # without reaching the finally that closes it, relying on GC to release
+    # the handle. Init now happens inside the main try, right before the
+    # agent is constructed — after every early-return path (#96290).
 
     # Wake-gate: if this job has a pre-check script, run it BEFORE building
     # the prompt so a ``{"wakeAgent": false}`` response can short-circuit
@@ -5848,6 +5936,7 @@ def run_job(
     _cron_session_var = _VAR_MAP["HERMES_CRON_SESSION"]
     _cron_session_token = None
     _non_dispatcher_token = None
+    _session_db = None
     try:
         if not _cwd_lock_acquired:
             # Fail closed (#79768): running without the lock would let a
@@ -6363,6 +6452,65 @@ def run_job(
                 job_id, _mcp_exc,
             )
 
+        # Initialize the SQLite session store so cron job messages are
+        # persisted and discoverable via session_search (same pattern as
+        # gateway/run.py) — only now, after every early-return path
+        # (wake-gate, prompt validation, drift skip) has passed, so a gated
+        # run never opens state.db just to abandon the handle (#96290).
+        #
+        # Bounded with its own timeout (separate from HERMES_CRON_TIMEOUT,
+        # which only watches the agent's run_conversation below):
+        # SessionDB.__init__ opens/migrates state.db synchronously and has no
+        # timeout of its own against a wedged sqlite3.connect (e.g. a stale
+        # flock left by a crashed sibling process). An unbounded hang here
+        # would wedge the job's worker thread, so the init is bounded and a
+        # timeout proceeds without a session store instead of blocking the
+        # run forever.
+        _session_db_timeout = _get_session_db_timeout()
+        try:
+            from hermes_state import SessionDB
+
+            if _session_db_timeout > 0:
+                _session_db_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                # The timeout worker is a second thread, so it does not inherit
+                # the multiplexed profile ContextVar automatically. Run the
+                # constructor inside a copy of the active context so a profile
+                # cron run resolves ITS OWN home (and state.db) instead of
+                # silently falling back to the process-global default.
+                _session_db_context = contextvars.copy_context()
+                _session_db_future = _session_db_pool.submit(
+                    _session_db_context.run, SessionDB
+                )
+                try:
+                    _session_db = _session_db_future.result(timeout=_session_db_timeout)
+                except concurrent.futures.TimeoutError:
+                    # The worker is abandoned (shutdown below doesn't wait for
+                    # it). If SessionDB() later completes inside it, the
+                    # future's result would be orphaned and its SQLite FDs
+                    # (.db, WAL, SHM) leak until process exit.  Register a
+                    # done-callback that retrieves and closes any eventual
+                    # late result (#72782).
+                    _session_db_future.add_done_callback(_close_late_session_db_result)
+                    raise
+                finally:
+                    # Don't wait for a wedged connect() to unwind — abandon the
+                    # worker thread (same pattern as the agent inactivity
+                    # timeout further down) rather than blocking shutdown on
+                    # it too.
+                    _session_db_pool.shutdown(wait=False)
+            else:
+                # 0 = unlimited (legacy behavior, opt-in for debugging)
+                _session_db = SessionDB()
+        except concurrent.futures.TimeoutError:
+            logger.error(
+                "Job '%s': SessionDB init did not return within %.0fs — proceeding "
+                "without a session store for this run instead of blocking it "
+                "forever",
+                job.get("id", "?"), _session_db_timeout,
+            )
+        except Exception as e:
+            logger.debug("Job '%s': SQLite session store not available: %s", job.get("id", "?"), e)
+
         agent = AIAgent(
             model=model,
             api_key=runtime.get("api_key"),
@@ -6370,6 +6518,7 @@ def run_job(
             provider=runtime.get("provider"),
             requested_provider=runtime.get("requested_provider"),
             api_mode=runtime.get("api_mode"),
+            request_overrides=runtime.get("request_overrides"),
             acp_command=runtime.get("command"),
             acp_args=runtime.get("args"),
             max_iterations=max_iterations,
@@ -6804,9 +6953,43 @@ def run_job(
                             break
                     except (Exception, KeyboardInterrupt):
                         continue
+            # Verified completion booking (#93820): the run may only be
+            # recorded as cron_complete when the session's LAST message row is
+            # a real assistant reply — a plain answer or the [SILENT] sentinel
+            # (both are assistant-text rows, so both classify as 'complete').
+            # A turn that died after a tool call, mid-API-wait, or without any
+            # assistant text leaves the last row as a tool result / pending
+            # call / user prompt and must not surface as a healthy run.
+            # session_lifecycle_statuses is the existing cost-bounded
+            # classifier for exactly this shape. Only a POSITIVELY recognized
+            # pathological status (see the status vocabulary in
+            # hermes_state's session_lifecycle_statuses docstring — keep the
+            # tuple below in sync when it grows) downgrades the booking: an
+            # unknown value (newer classifier shape, test doubles) keeps the
+            # historical reason, and so does a failed probe — the booking
+            # itself is FAIL-OPEN on probe errors, because classification is
+            # best-effort metadata and must not mislabel a healthy run.
+            _end_reason = "cron_complete"
+            try:
+                _statuses = _session_db.session_lifecycle_statuses(
+                    [_final_cron_session_id]
+                )
+                _lifecycle = _statuses.get(_final_cron_session_id)
+                if _lifecycle in ("interrupted", "error", "empty"):
+                    _end_reason = "cron_incomplete_no_output"
+                    logger.warning(
+                        "Job '%s': session ended without a final assistant "
+                        "message (lifecycle=%s) — booking run as %s",
+                        job_id, _lifecycle, _end_reason,
+                    )
+            except (Exception, KeyboardInterrupt) as e:
+                logger.debug(
+                    "Job '%s': session lifecycle classification failed: %s",
+                    job_id, e,
+                )
             try:
                 _session_db.end_session(
-                    _final_cron_session_id, "cron_complete"
+                    _final_cron_session_id, _end_reason
                 )
             except (Exception, KeyboardInterrupt) as e:
                 logger.debug("Job '%s': failed to end session: %s", job_id, e)
@@ -6993,6 +7176,15 @@ def run_one_job(
     run cooperatively — agent interruption AND script process-tree kill —
     through the single fenced completion path.
     """
+    if extra_prompt is None:
+        # A gateway-forwarded manual run (`hermes cron run --prompt` /
+        # cronjob(action='run', prompt=...) on a relay-fronted target) stamps
+        # its transient context on the job via trigger_job; the ticker/Chronos
+        # fire that consumes the manual occurrence carries it here. Single-fire:
+        # mark_job_run clears the field after the run.
+        _stamped = job.get("manual_run_prompt")
+        if _stamped and job.get("manual_run_at"):
+            extra_prompt = str(_stamped)
     claim = job.get("fire_claim")
     fire_owner = str(claim.get("by") or "") if isinstance(claim, dict) else ""
     execution_token = object()
@@ -7078,6 +7270,13 @@ def _run_one_job_body(
     # computation and the post-delivery "alerted" transition.
     incident_acked = False
     failure_incident_id = None
+    from agent.secret_scope import (
+        build_profile_secret_scope,
+        reset_secret_scope,
+        set_secret_scope,
+    )
+
+    _scope_token = None
     try:
         # Pre-run dispatch claim (issue #38758): atomically commit a finite
         # one-shot's dispatch BEFORE its side effect runs, so a tick that dies
@@ -7102,18 +7301,11 @@ def _run_one_job_body(
         # becomes running only immediately before the actual run.
         mark_execution_running(execution_id)
 
-        # Run the job under the profile's secret scope. get_secret() fails
-        # closed outside a scope once profile isolation is in play (multiple
-        # gateway profiles / room→profile multiplexing), and cron fires from
-        # the ticker thread where no per-turn scope is installed — so
-        # resolve_runtime_provider() raised UnscopedSecretError before model
-        # selection, breaking every cron job. Mirrors the per-turn pattern in
-        # gateway/run.py (_profile_runtime_scope).
-        from agent.secret_scope import (
-            build_profile_secret_scope,
-            reset_secret_scope,
-            set_secret_scope,
-        )
+        # Run and deliver under the profile's secret scope. get_secret() fails
+        # closed outside a scope once profile isolation is active, and cron
+        # fires from a ticker thread with no per-turn scope. Delivery adapters
+        # can also resolve credentials, so resetting after run_job would leave
+        # _deliver_result unscoped. Mirrors gateway/run.py's per-turn pattern.
 
         _scope_token = set_secret_scope(
             build_profile_secret_scope(_get_hermes_home())
@@ -7149,8 +7341,7 @@ def _run_one_job_body(
             for _deferred_agent in _deferred_agents:
                 _teardown_cron_agent(_deferred_agent, job["id"])
             raise
-        finally:
-            reset_secret_scope(_scope_token)
+        # The outer finally resets the scope after delivery and bookkeeping.
 
         if _fire_claim_ownership_lost():
             for _deferred_agent in _deferred_agents:
@@ -7538,6 +7729,13 @@ def _run_one_job_body(
         if not isinstance(e, Exception):
             raise
         return False
+    finally:
+        # Function-level on purpose: this must scope delivery, deferred-agent
+        # teardown, claim-loss handling and bookkeeping, not just run_job.
+        # An earlier revision reset inside the run block's finally, which left
+        # _deliver_result unscoped — do not move it back in a tidy-up.
+        if _scope_token is not None:
+            reset_secret_scope(_scope_token)
 
 
 def _notify_provider_jobs_changed() -> None:
@@ -7610,6 +7808,102 @@ def create_job_with_scheduler_registration(**kwargs) -> dict:
 _DEAD_OWNER_REAP_INTERVAL_SECONDS = 300.0
 _last_dead_owner_reap_at: Optional[float] = None
 
+# Worktree maintenance throttle: the startup pruner historically ran only on
+# `hermes -w` launches, so on gateway-driven boxes (where sessions arrive via
+# Telegram/Discord and nobody launches the CLI for days) merged scratch trees
+# accumulated into tens of GB. The cron tick is the one reliably periodic
+# process on every install, so it owns a low-frequency sweep too. Tests may
+# reset _last_worktree_maintenance_at to None to force a sweep next tick.
+_WORKTREE_MAINTENANCE_INTERVAL_SECONDS = 6 * 3600.0
+_last_worktree_maintenance_at: Optional[float] = None
+_worktree_maintenance_lock = threading.Lock()
+
+
+def _worktree_maintenance_repos() -> List[str]:
+    """Repos whose ``.worktrees/`` this scheduler should keep pruned.
+
+    Candidates: the hermes install checkout itself (where ``hermes -w``
+    sessions on dev boxes create trees) and every configured job workdir's
+    repo root. Only repos that actually have a ``.worktrees/`` dir survive —
+    everything else costs nothing.
+    """
+    repos: set = set()
+
+    # The hermes source checkout (editable/git installs). Wheel installs have
+    # no .git here and are skipped.
+    try:
+        install_root = Path(__file__).resolve().parent.parent
+        if (install_root / ".git").exists():
+            repos.add(str(install_root))
+    except Exception:
+        pass
+
+    # Job workdirs may point inside other repos the agent works on.
+    try:
+        from cron.jobs import load_jobs
+
+        for job in load_jobs():
+            workdir = str(job.get("workdir") or "").strip()
+            if not workdir or not Path(workdir).is_dir():
+                continue
+            try:
+                probe = subprocess.run(
+                    ["git", "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=5, cwd=workdir,
+                )
+                if probe.returncode == 0 and probe.stdout.strip():
+                    repos.add(probe.stdout.strip())
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return [r for r in sorted(repos) if (Path(r) / ".worktrees").is_dir()]
+
+
+def _maybe_run_worktree_maintenance() -> None:
+    """Throttled, threaded worktree prune from the cron tick.
+
+    Runs ``cli._prune_stale_worktrees`` (the same conservative pruner the
+    ``hermes -w`` startup path uses — dirty/unpushed/live-locked trees are
+    never touched) against every candidate repo, on a daemon thread so the
+    tick itself never waits on git. Errors never propagate: worktree GC is
+    hygiene, not scheduling.
+    """
+    global _last_worktree_maintenance_at
+    now = time.monotonic()
+    with _worktree_maintenance_lock:
+        if (
+            _last_worktree_maintenance_at is not None
+            and now - _last_worktree_maintenance_at
+            < _WORKTREE_MAINTENANCE_INTERVAL_SECONDS
+        ):
+            return
+        _last_worktree_maintenance_at = now
+
+    def _run() -> None:
+        try:
+            repos = _worktree_maintenance_repos()
+            if not repos:
+                return
+            from cli import _prune_stale_worktrees
+
+            for repo in repos:
+                try:
+                    _prune_stale_worktrees(repo)
+                except Exception:
+                    logger.debug(
+                        "Cron worktree maintenance failed for %s", repo,
+                        exc_info=True,
+                    )
+        except Exception:
+            logger.debug("Cron worktree maintenance skipped", exc_info=True)
+
+    threading.Thread(
+        target=_run, name="cron-worktree-prune", daemon=True
+    ).start()
+
 
 def tick(
     verbose: bool = True,
@@ -7636,7 +7930,7 @@ def tick(
         Number of jobs executed (0 if another tick is already running)
     """
     lock_dir, lock_file = _get_lock_paths()
-    lock_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_cron_dir(lock_dir)
 
     # Cross-platform file locking: fcntl on Unix, msvcrt on Windows.
     # Only genuine lock contention (another ticker holds the lock) skips the
@@ -7727,6 +8021,14 @@ def tick(
                     )
             except Exception as _reap_exc:
                 logger.debug("Dead-owner execution reclaim failed: %s", _reap_exc)
+
+        # Periodic worktree GC (throttled to every 6h, threaded): gateway-only
+        # boxes never hit the `hermes -w` startup pruner, so this is the only
+        # sweep they get. Same conservative pruner, same guards.
+        try:
+            _maybe_run_worktree_maintenance()
+        except Exception as _wt_exc:
+            logger.debug("Worktree maintenance dispatch failed: %s", _wt_exc)
 
         due_jobs = get_due_jobs()
 

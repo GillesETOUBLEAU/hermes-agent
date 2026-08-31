@@ -958,17 +958,13 @@ def ensure_hermes_home():
     home = get_hermes_home()
     key = str(home)
 
+    # Named profiles must be created explicitly (e.g. ``hermes profile create``).
+    # Check tombstones before the memo so a stale empty shell cannot skip
+    # the deleted-profile guard.
+    from hermes_constants import assert_named_profile_home_live
+    assert_named_profile_home_live(home)
     if key in _HERMES_HOME_ENSURED and home.is_dir():
         return
-    # Named profiles must be created explicitly (e.g. ``hermes profile create``).
-    # If a stale process keeps running after the profile was renamed/deleted,
-    # silently mkdir-ing the old HERMES_HOME would resurrect an empty skeleton
-    # and make the deleted profile reappear in Desktop/profile lists.
-    if home.parent.name == "profiles" and not home.exists():
-        raise FileNotFoundError(
-            f"Named profile home does not exist: {home}. "
-            "Create the profile explicitly before using it."
-        )
     if is_managed():
         old_umask = os.umask(0o007)
         try:
@@ -1025,7 +1021,6 @@ ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
     4: ["VOICE_TOOLS_OPENAI_KEY", "ELEVENLABS_API_KEY"],
     5: ["WHATSAPP_ENABLED", "WHATSAPP_MODE", "WHATSAPP_ALLOWED_USERS",
         "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_ALLOWED_USERS"],
-    10: ["TAVILY_API_KEY"],
     11: ["TERMINAL_MODAL_MODE"],
 }
 
@@ -1230,7 +1225,7 @@ def _is_env_config_key(key: str) -> bool:
         'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'VOICE_TOOLS_OPENAI_KEY',
         'EXA_API_KEY', 'PARALLEL_API_KEY', 'FIRECRAWL_API_KEY', 'FIRECRAWL_API_URL',
         'FIRECRAWL_GATEWAY_URL', 'TOOL_GATEWAY_DOMAIN', 'TOOL_GATEWAY_SCHEME',
-        'TOOL_GATEWAY_USER_TOKEN', 'TAVILY_API_KEY',
+        'TOOL_GATEWAY_USER_TOKEN',
         'BROWSERBASE_API_KEY', 'BROWSERBASE_PROJECT_ID', 'BROWSER_USE_API_KEY',
         'FAL_KEY', 'TELEGRAM_BOT_TOKEN', 'DISCORD_BOT_TOKEN',
         'TERMINAL_SSH_HOST', 'TERMINAL_SSH_USER', 'TERMINAL_SSH_KEY',
@@ -1389,6 +1384,54 @@ def _canonical_api_mode(api_mode: str) -> str:
     return _API_MODE_ALIASES.get(cleaned.lower(), cleaned)
 
 
+def coerce_provider_id(value: Any) -> str:
+    """Provider identity fields are strings.
+
+    PyYAML loads unquoted scalars like ``provider: 2070`` / ``2070:`` as int,
+    and later ``.strip()`` / ``.lower()`` on that value 500s the Model tab.
+    """
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def stringify_provider_map(providers: Any) -> dict:
+    """Copy a ``providers:`` mapping so keys are strings.
+
+    Desktop Custom Endpoints store the name as the dict key. An unquoted
+    YAML key ``2070:`` loads as int; picker code then calls ``ep_name.lower()``
+    and CRUD looks up ``"2070"`` and misses.
+    """
+    if not isinstance(providers, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for stored, value in providers.items():
+        key = coerce_provider_id(stored)
+        if key:
+            out[key] = value
+    return out
+
+
+def find_provider_entry(providers: Any, key: Any) -> Tuple[Any, Optional[Dict[str, Any]]]:
+    """Return ``(stored_key, entry)`` matching *key* by string identity.
+
+    Needed because PyYAML may have stored the key as ``2070`` (int) while
+    Desktop looks up ``"2070"``. Prefer an exact string hit, then scan.
+    """
+    if not isinstance(providers, dict):
+        return None, None
+    want = coerce_provider_id(key)
+    if not want:
+        return None, None
+    exact = providers.get(want)
+    if isinstance(exact, dict):
+        return want, exact
+    for stored, entry in providers.items():
+        if coerce_provider_id(stored) == want and isinstance(entry, dict):
+            return stored, entry
+    return None, None
+
+
 def _normalize_custom_provider_entry(
     entry: Any,
     *,
@@ -1406,6 +1449,7 @@ def _normalize_custom_provider_entry(
     # alias keys back into config.yaml through any later
     # save_config(load_config()) round-trip.
     entry = dict(entry)
+    provider_key = coerce_provider_id(provider_key)
 
     # Accept camelCase aliases commonly used in hand-written configs.
     _CAMEL_ALIASES: Dict[str, str] = {
@@ -1435,7 +1479,7 @@ def _normalize_custom_provider_entry(
         "models_discovered",
         "context_length", "rate_limit_delay",
         "request_timeout_seconds", "stale_timeout_seconds",
-        "discover_models", "extra_body", "extra_headers",
+        "discover_models", "extra_body", "extra_headers", "capabilities",
         "ssl_ca_cert", "ssl_verify",
     }
     for camel, snake in _CAMEL_ALIASES.items():
@@ -1483,12 +1527,7 @@ def _normalize_custom_provider_entry(
     if not base_url:
         return None
 
-    name = ""
-    raw_name = entry.get("name")
-    if isinstance(raw_name, str) and raw_name.strip():
-        name = raw_name.strip()
-    elif provider_key.strip():
-        name = provider_key.strip()
+    name = coerce_provider_id(entry.get("name")) or provider_key
     if not name:
         return None
 
@@ -1564,6 +1603,16 @@ def _normalize_custom_provider_entry(
 
     if models_discovered:
         normalized["models_discovered"] = True
+
+    capabilities = entry.get("capabilities")
+    if isinstance(capabilities, dict):
+        normalized_capabilities = {
+            key: value
+            for key, value in capabilities.items()
+            if isinstance(key, str) and isinstance(value, bool)
+        }
+        if normalized_capabilities:
+            normalized["capabilities"] = normalized_capabilities
 
     context_length = entry.get("context_length")
     if isinstance(context_length, int) and context_length > 0:
@@ -1650,7 +1699,9 @@ def providers_dict_to_custom_providers(providers_dict: Any) -> List[Dict[str, An
     for key, entry in providers_dict.items():
         if isinstance(entry, dict) and not is_provider_enabled(entry):
             continue
-        normalized = _normalize_custom_provider_entry(entry, provider_key=str(key))
+        normalized = _normalize_custom_provider_entry(
+            entry, provider_key=coerce_provider_id(key)
+        )
         if normalized is not None:
             custom_providers.append(normalized)
 
@@ -3598,6 +3649,7 @@ TERMINAL_CONFIG_ENV_MAP = {
     "modal_mode": "TERMINAL_MODAL_MODE",
     "degraded_mode": "TERMINAL_DEGRADED_MODE",
     "cwd": "TERMINAL_CWD",
+    "temp_dir": "TERMINAL_TEMP_DIR",
     "timeout": "TERMINAL_TIMEOUT",
     "lifetime_seconds": "TERMINAL_LIFETIME_SECONDS",
     "docker_image": "TERMINAL_DOCKER_IMAGE",
@@ -4335,8 +4387,12 @@ def _env_line_defines_key(
     assigned_key, separator, _value = stripped.partition("=")
     if not separator:
         return False
+    # load_env() strips whitespace around the parsed name, so `KEY = value`
+    # IS a live assignment. The writers must match the same shape, or a
+    # hand-edited spaced line is invisible to save (duplicate appended) and
+    # remove (line survives -> value resurrects on next load). #67488.
     return _env_var_policy_name(
-        assigned_key,
+        assigned_key.strip(),
         is_windows=is_windows,
     ) == _env_var_policy_name(key, is_windows=is_windows)
 
@@ -4817,7 +4873,6 @@ def show_config():
         ("EXA_API_KEY", "Exa"),
         ("PARALLEL_API_KEY", "Parallel"),
         ("FIRECRAWL_API_KEY", "Firecrawl"),
-        ("TAVILY_API_KEY", "Tavily"),
         ("BROWSERBASE_API_KEY", "Browserbase"),
         ("BROWSER_USE_API_KEY", "Browser Use"),
         ("FAL_KEY", "FAL"),
