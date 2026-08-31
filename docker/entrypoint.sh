@@ -188,12 +188,16 @@ fi
 # while the live token carries documents — enough of a mismatch for Google to
 # answer invalid_scope, making `setup.py --check` report REFRESH_FAILED on a
 # healthy token. Refresh it from the bundled copy like every other profile.
-_gwsk="$INSTALL_DIR/skills/productivity/google-workspace"
-if [ -d "$_gwsk" ] && { [ -n "$RAILWAY_ENVIRONMENT" ] || [ ! -d "$HERMES_HOME/skills/productivity/google-workspace" ]; }; then
-    mkdir -p "$HERMES_HOME/skills/productivity"
-    rm -rf "$HERMES_HOME/skills/productivity/google-workspace"
-    cp -a "$_gwsk" "$HERMES_HOME/skills/productivity/google-workspace" 2>/dev/null || true
-fi
+# gws-cli rides along: its SKILL.md documents the auth flow, and a stale copy
+# keeps pointing agents at the dead GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE path.
+for _gwsname in google-workspace gws-cli; do
+    _gwsk="$INSTALL_DIR/skills/productivity/$_gwsname"
+    if [ -d "$_gwsk" ] && { [ -n "$RAILWAY_ENVIRONMENT" ] || [ ! -d "$HERMES_HOME/skills/productivity/$_gwsname" ]; }; then
+        mkdir -p "$HERMES_HOME/skills/productivity"
+        rm -rf "$HERMES_HOME/skills/productivity/$_gwsname"
+        cp -a "$_gwsk" "$HERMES_HOME/skills/productivity/$_gwsname" 2>/dev/null || true
+    fi
+done
 
 # --- Named profiles: seed dedicated agents on the volume (idempotent) --------
 # "web-design" and "web-dev" are full Hermes profiles living under
@@ -430,21 +434,55 @@ if [ -d "$HERMES_HOME/profiles" ]; then
     echo "[entrypoint] MCP OAuth: shared token store → $_MCP_TOKENS"
 fi
 
-# gws CLI — set up config directory and bridge credentials if available
+# gws CLI — auth shim on PATH.
+#
+# The Google Workspace CLI authenticates non-interactively ONLY via
+# GOOGLE_WORKSPACE_CLI_TOKEN (a short-lived access token). Handing it a
+# credentials JSON through GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE — what
+# bridge_auth.py --bridge used to do here — is rejected by gws locally with
+# "Access denied. No credentials provided." before any request leaves the
+# container, so EVERY gws call failed. Verified against gws 0.4.4 both with and
+# without an "authorized_user" `type` field, so the older diagnosis (missing
+# `type`, b2eebe330a) is superseded: the file path simply is not an auth path.
+#
+# Access tokens live ~1h, longer than nothing but shorter than an agent
+# session, so exporting one here at boot would go stale. Instead install a shim
+# named `gws` ahead of the npm binary on PATH: it mints a fresh token per
+# invocation from the google-workspace skill's shared google_token.json, then
+# exec's the real CLI.
 GWS_CONFIG_DIR="$HERMES_HOME/gws-config"
 mkdir -p "$GWS_CONFIG_DIR"
 export GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$GWS_CONFIG_DIR"
 
-# If gws credentials file is set via env var, use it directly
-if [ -n "$GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE" ]; then
-    echo "[entrypoint] gws CLI: using credentials from GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"
-# Otherwise, bridge from existing google-workspace Python skill token
-elif [ -f "$HERMES_HOME/google_token.json" ]; then
-    BRIDGE_SCRIPT="$INSTALL_DIR/skills/productivity/gws-cli/scripts/bridge_auth.py"
-    if [ -f "$BRIDGE_SCRIPT" ]; then
-        python3 "$BRIDGE_SCRIPT" --bridge 2>/dev/null && \
-            export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="$GWS_CONFIG_DIR/credentials.json" && \
-            echo "[entrypoint] gws CLI: bridged credentials from google-workspace skill"
+if [ -n "$GOOGLE_WORKSPACE_CLI_TOKEN" ]; then
+    echo "[entrypoint] gws CLI: honoring GOOGLE_WORKSPACE_CLI_TOKEN from the environment"
+else
+    # Prefer the install tree: it is rebuilt with the image, whereas the volume
+    # copy can be an old seeded version.
+    _gws_scripts="$INSTALL_DIR/skills/productivity/gws-cli/scripts"
+    [ -d "$_gws_scripts" ] || _gws_scripts="$HERMES_HOME/skills/productivity/gws-cli/scripts"
+
+    # Resolve the real CLI explicitly, never the shim itself — that would recurse.
+    GWS_REAL_BIN=""
+    for _c in /usr/local/bin/gws /usr/bin/gws; do
+        [ -x "$_c" ] && { GWS_REAL_BIN="$_c"; break; }
+    done
+    [ -n "$GWS_REAL_BIN" ] || GWS_REAL_BIN="$(command -v gws 2>/dev/null || true)"
+    [ "$GWS_REAL_BIN" = "$HERMES_HOME/bin/gws" ] && GWS_REAL_BIN=""
+
+    if [ -n "$GWS_REAL_BIN" ] && [ -f "$_gws_scripts/gws-wrapper.sh" ]; then
+        mkdir -p "$HERMES_HOME/bin"
+        cp "$_gws_scripts/gws-wrapper.sh" "$HERMES_HOME/bin/gws"
+        chmod +x "$HERMES_HOME/bin/gws"
+        export GWS_REAL_BIN
+        export HERMES_GWS_TOKEN_HELPER="$_gws_scripts/gws_token.py"
+        PATH="$HERMES_HOME/bin:$PATH"
+        export PATH
+        echo "[entrypoint] gws CLI: token shim -> $HERMES_HOME/bin/gws (real: $GWS_REAL_BIN)"
+    elif [ -z "$GWS_REAL_BIN" ]; then
+        echo "[entrypoint] gws CLI: binary not found, skipping shim"
+    else
+        echo "[entrypoint] gws CLI: gws-wrapper.sh not found in $_gws_scripts, skipping shim"
     fi
 fi
 

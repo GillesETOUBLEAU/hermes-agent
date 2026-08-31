@@ -35,8 +35,13 @@ Outputs structured JSON. Supports all Google Discovery APIs dynamically.
 
 ## Authentication
 
-gws uses the same Google account as the `google-workspace` skill. Auth is bridged
-automatically via the entrypoint script.
+gws shares the Google account — and the very same `google_token.json` — as the
+`google-workspace` skill. Nothing to set up here: just run `gws`.
+
+On Railway the entrypoint installs a shim named `gws` ahead of the real CLI on
+PATH. Every call mints a fresh access token from that shared token file and
+hands it to the real binary through `GOOGLE_WORKSPACE_CLI_TOKEN`. Token refresh
+is automatic and per-invocation, so long agent sessions never go stale.
 
 ### Check auth status
 
@@ -44,21 +49,27 @@ automatically via the entrypoint script.
 gws auth status
 ```
 
+Expect `auth_method: token`. Anything else means the shim is not on PATH — check
+the boot log for `[entrypoint] gws CLI: token shim ->`.
+
 ### If not authenticated
 
-The entrypoint bridges credentials from the existing google-workspace Python skill.
-If that's not set up yet, follow the `google-workspace` skill setup first, then
-the bridge script will convert the token for gws.
+gws has no credentials of its own. Set up the `google-workspace` skill first
+(`scripts/setup.py`); once `setup.py --check` prints `AUTHENTICATED`, gws works.
 
-Alternatively, set up gws directly:
+### Do NOT use GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE
 
-```bash
-# Option 1: Use exported credentials file (headless/Railway)
-export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/credentials.json
+Pointing that variable at a token or `authorized_user` JSON does not
+authenticate gws. It is rejected locally with `Access denied. No credentials
+provided.` before any request reaches Google — verified against gws 0.4.4, with
+and without a `type` field. `GOOGLE_WORKSPACE_CLI_TOKEN` is the only working
+non-interactive path, which is exactly what the shim uses. The entrypoint no
+longer sets the variable at all.
 
-# Option 2: Interactive login (local only)
-gws auth login
-```
+`scripts/bridge_auth.py --bridge` wrote that credentials file and is therefore
+**deprecated** — kept only for `--status`. To override auth deliberately, set
+`GOOGLE_WORKSPACE_CLI_TOKEN` in the environment: the entrypoint honors it and
+skips the shim.
 
 ## Helper Commands (High-Level Workflows)
 

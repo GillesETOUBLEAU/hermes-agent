@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-"""Bridge authentication from Hermes google-workspace Python skill to gws CLI.
+"""DEPRECATED — inspect auth status only; --bridge no longer authenticates gws.
 
-Converts the existing google_token.json + google_client_secret.json
-into a gws-compatible credentials file so both tools share the same OAuth session.
+Converts the existing google_token.json + google_client_secret.json into a
+credentials file handed to gws via GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE.
+
+That is a dead end: gws rejects a credentials file locally with "Access denied.
+No credentials provided." before any request reaches Google (verified against
+gws 0.4.4, with and without an "authorized_user" `type` field). The working
+non-interactive path is GOOGLE_WORKSPACE_CLI_TOKEN, which docker/entrypoint.sh
+now feeds through the `gws` shim (gws-wrapper.sh + gws_token.py).
+
+`--status` is still useful. `--bridge` and `--check` are kept only so older
+callers do not crash.
 
 Usage:
   python bridge_auth.py --check       # Check if gws credentials exist
@@ -64,7 +73,16 @@ def check_python_auth() -> bool:
 
 
 def bridge_auth():
-    """Convert Python google-workspace OAuth token to gws CLI format."""
+    """DEPRECATED: convert Python OAuth token to a gws credentials file.
+
+    gws does not authenticate from this file — see the module docstring.
+    """
+    print(
+        "WARNING: --bridge is deprecated and does not authenticate gws. "
+        "The gws shim installed by docker/entrypoint.sh uses "
+        "GOOGLE_WORKSPACE_CLI_TOKEN instead.",
+        file=sys.stderr,
+    )
     if not GOOGLE_TOKEN_PATH.exists():
         print(f"ERROR: No Python OAuth token at {GOOGLE_TOKEN_PATH}")
         print("Set up the google-workspace skill first, or run gws auth login directly.")
