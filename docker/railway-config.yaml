@@ -31,7 +31,21 @@ fallback_providers:
 
 gateway:
   platforms:
-    discord: {}
+    # Serveur « Pippa server » (guild 1467596051283185747), catégorie Text
+    # Channels. Le DM Gilles (1467614563489812673) RESTE la surface de triage
+    # par défaut : ces salons ne font que délester le cron et le Kanban.
+    #
+    # Tout est dans ce bloc imbriqué et PAS dans une section `discord:` de
+    # premier niveau : gateway/config.py fait tomber les deux passes de
+    # lecture (bridge YAML→env ET bridge des extras) sur ce bloc quand aucune
+    # section top-level n'existe. Ajouter un `discord:` top-level ferait
+    # ignorer ce bloc par la passe env.
+    discord:
+      require_mention: true          # dans un salon serveur : @mention obligatoire
+      auto_thread: true              # 1 @mention dans #chat = 1 fil dédié (session isolée)
+      no_thread_channels:            # salons de notification : réponse à plat
+        - "1545105470002303016"      # #cron
+        - "1545105517033037915"      # #kanban
 
 terminal:
   backend: local
@@ -75,7 +89,7 @@ kanban:
   # sur le volume) qui appelle _kb.add_notify_sub sur chaque kanban_create.
   always_notify:
     - platform: "discord"
-      chat_id: "1467614563489812673"   # DM Discord Gilles (ID numérique obligatoire)
+      chat_id: "1545105517033037915"   # #kanban (Pippa server) — ID numérique obligatoire
 
 # Enables the Kanban orchestrator tool surface (kanban_create/list/unblock) so
 # this profile can create and assign cross-profile tasks. Le gate lit cette liste
