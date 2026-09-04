@@ -2,8 +2,10 @@
 
 import json
 
-from agent.message_sanitization import tool_args_look_truncated
-from run_agent import _repair_tool_call_arguments
+from agent.message_sanitization import (
+    _repair_tool_call_arguments,
+    tool_args_look_truncated,
+)
 
 
 class TestRepairToolCallArguments:
