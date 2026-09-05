@@ -4,17 +4,41 @@
 # Netlify via CLI (installé dans l'image), auth NETLIFY_AUTH_TOKEN.
 # Les ${VAR} sont interpolées depuis l'environnement du process (injecté par Railway).
 
-# Modèle par défaut : Z.AI GLM 5.3 Flash (via OpenRouter, OPENROUTER_API_KEY).
+# Modèle par défaut : Claude Sonnet 5 en direct sur l'API Anthropic
+# (ANTHROPIC_API_KEY, var Railway). Remplace GLM 5.3 Flash via OpenRouter
+# (2026-09-05) : la charge web-dev est agentique (boucles longues, dizaines de
+# tool-calls MCP/terminal par carte Kanban), et les Flash chinois ont cassé les
+# tool-calls en streaming (GLM 5.2, 21/08). Le direct Anthropic active en plus le
+# prompt caching natif, principal levier de coût sur des boucles qui renvoient
+# tout le contexte à chaque tour.
 model:
-  default: "z-ai/glm-5.3-flash"
-  provider: "openrouter"
+  default: "claude-sonnet-5"
+  provider: "anthropic"
 
-# Bascule automatique mi-session si OpenRouter sature : Opus 5 en direct sur
-# l'API Anthropic (ANTHROPIC_API_KEY, var Railway — miroir des profils
-# orchestrateur/web-design qui font l'inverse).
+# Profondeur de raisonnement du modèle principal. Vide = medium ; "high" est le
+# point d'équilibre pour du code agentique (passer à xhigh si raccourcis constatés).
+agent:
+  reasoning_effort: "high"
+
+# TTL des points de cache Anthropic : 1h au lieu de 5m, car un build Netlify ou un
+# déploiement dépasse souvent 5 minutes entre deux tours et faisait expirer le cache.
+prompt_caching:
+  cache_ttl: "1h"
+
+# Bascule automatique mi-session si l'API Anthropic directe sature
+# (overloaded_error, cf. incident web-design 2026-07-26) : même Sonnet 5 via
+# OpenRouter (pas de dérive de comportement), puis Opus 5 direct en dernier recours.
 fallback_providers:
+  - provider: openrouter
+    model: "anthropic/claude-sonnet-5"
   - provider: anthropic
     model: "claude-opus-5"
+
+# Sous-agents (delegate_task) sur Haiku 4.5 via OpenRouter au lieu d'hériter du
+# modèle principal : suffisant pour les tâches déléguées, 5x moins cher que Sonnet.
+delegation:
+  provider: "openrouter"
+  model: "anthropic/claude-haiku-4-5"
 
 terminal:
   backend: local
@@ -33,6 +57,13 @@ auxiliary:
   approval:
     provider: "openrouter"
     model: "google/gemini-2.5-flash"
+  # Compression de contexte épinglée sur un modèle rapide/économe avec raisonnement
+  # minimal : par défaut elle hérite du modèle principal, donc chaque résumé de
+  # contexte serait facturé au prix de Sonnet/Opus.
+  compression:
+    provider: "openrouter"
+    model: "google/gemini-2.5-flash"
+    reasoning_effort: "low"
 
 mcp_servers:
   # GitHub — serveur MCP officiel hébergé, auth par PAT en Bearer.
