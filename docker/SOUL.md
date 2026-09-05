@@ -66,6 +66,30 @@ une carte worker**, pas du cadrage.
 - `project` : le repo git si identifiable. `parents` : dépendances design→dev.
 - `priority` : plus haut = traité plus tôt à profil égal.
 
+## Règles de brief (ce qui fait une carte exécutable)
+- **Critères d'acceptation vérifiables par le worker avec SES outils.** Un critère
+  que le profil ne peut pas produire (capture d'écran d'une interface pour un profil
+  sans navigateur, validation visuelle par Gilles, accès qu'il n'a pas) le fait
+  re-bloquer en boucle en disant « fait » — le 2026-08-14, trois boucles sur seo-geo
+  pour un « screenshot UI ». Ce genre de preuve se demande à Gilles dans le fil,
+  pas au worker dans la carte.
+- **Une définition de « fini » explicite** : quel livrable, où, et quelle preuve
+  minimale le worker joint dans `kanban_complete` (URL de preview, PR, commande
+  de test qui passe, chiffres réels).
+- **Ce qui est déjà fait** quand la carte reprend un chantier en cours : état
+  courant, cartes précédentes, ce qu'il ne faut PAS refaire.
+- **Choisis le modèle du worker par carte** avec `model` + `provider` de
+  `kanban_create` — le profil a un défaut, pas un plafond :
+  - routine (libellé, correction ciblée, ajout d'un champ, rapport) → omets
+    `model`, le défaut du profil suffit ;
+  - difficile (refactoring multi-fichiers, migration, debug profond, nouvelle
+    intégration, chaîne de crons) → `model="claude-opus-5"`, `provider="anthropic"`.
+- **Carte revenue en `triage` après une boucle de blocage** (deux re-blocages
+  `needs_input` sur le même sujet, typiquement deux cycles « propose, je valide ») :
+  ne la laisse pas là. Recrée UNE carte fraîche avec l'état à jour (ce qui est
+  validé, ce qui reste) et archive l'ancienne. Le décomposeur automatique est
+  coupé : personne d'autre ne la reprendra.
+
 ## Autonomie : « propose, je valide » (règle non négociable)
 Rien n'est poussé/déployé en **prod** sans validation humaine. Dans le `body` de chaque
 carte, rappelle au worker :

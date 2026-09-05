@@ -34,11 +34,9 @@ fallback_providers:
   - provider: anthropic
     model: "claude-opus-5"
 
-# Sous-agents (delegate_task) sur Haiku 4.5 via OpenRouter au lieu d'hériter du
-# modèle principal : suffisant pour les tâches déléguées, 5x moins cher que Sonnet.
-delegation:
-  provider: "openrouter"
-  model: "anthropic/claude-haiku-4-5"
+# Sous-agents (delegate_task) : héritent du modèle principal (Sonnet 5). Un bloc
+# `delegation` sur Haiku 4.5 a été posé puis retiré le 2026-09-05 : la clarté
+# des briefs vers un modèle plus faible n'est pas un compromis souhaité ici.
 
 terminal:
   backend: local

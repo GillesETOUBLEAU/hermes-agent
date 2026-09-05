@@ -47,6 +47,14 @@ gateway:
         - "1545105470002303016"      # #cron
         - "1545105517033037915"      # #kanban
 
+# L'orchestrateur n'a qu'une sortie : la carte Kanban. Le preset Discord lui
+# donnait aussi `delegate_task` — constaté le 2026-09-05 : il a lancé un
+# sous-agent lui-même malgré la règle « jamais d'exécution ». Retiré ici ;
+# SOUL.md porte la règle, la config la rend impossible à contourner.
+agent:
+  disabled_toolsets:
+    - delegation
+
 terminal:
   backend: local
 
@@ -84,6 +92,13 @@ stt:
 # all profiles (see hermes_cli/kanban_db.py: kanban_home).
 kanban:
   dispatch_in_gateway: true
+  # Décomposeur automatique coupé (2026-09-05). Il ne se déclenche que sur les
+  # cartes en `triage`, c'est-à-dire ici sur des cartes escaladées après une
+  # boucle de blocage (chantier déjà en cours) : le 2026-09-04 il a produit
+  # trois cartes doublons (briefs de 1 000 caractères) du chantier TTT, nettoyées
+  # à la main. L'orchestrateur écrit de bien meilleurs briefs : en manuel, une
+  # carte qui tombe en triage est notifiée et re-spécifiée par lui.
+  auto_decompose: false
   # Notifications Kanban — Discord uniquement (WhatsApp retiré 2026-07-26).
   # Lu par le monkeypatch kanban_always_notify_patch.py (usercustomize.py,
   # sur le volume) qui appelle _kb.add_notify_sub sur chaque kanban_create.
