@@ -193,7 +193,7 @@ def save_draft(msg: EmailMessage) -> None:
     if not folder:
         m.logout()
         die("no Drafts folder found on the server")
-    typ, _ = m.append(f'"{folder}"', "\\Draft", imaplib.Time2Internaldate(datetime.now()), msg.as_bytes())
+    typ, _ = m.append(f'"{folder}"', "\\Draft", imaplib.Time2Internaldate(datetime.now(timezone.utc)), msg.as_bytes())
     m.logout()
     if typ != "OK":
         die("could not append the draft")
@@ -221,7 +221,7 @@ def deliver(msg: EmailMessage, recipients: list[str]) -> None:
         m = imap()
         folder = sent_folder(m)
         if folder:
-            m.append(f'"{folder}"', "\\Seen", imaplib.Time2Internaldate(datetime.now()), msg.as_bytes())
+            m.append(f'"{folder}"', "\\Seen", imaplib.Time2Internaldate(datetime.now(timezone.utc)), msg.as_bytes())
         m.logout()
     except Exception as exc:  # noqa: BLE001
         print(f"WARNING: sent, but could not copy to Sent folder ({type(exc).__name__})", file=sys.stderr)
