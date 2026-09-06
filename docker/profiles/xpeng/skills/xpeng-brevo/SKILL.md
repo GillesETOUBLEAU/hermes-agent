@@ -13,15 +13,16 @@ metadata:
 
 # xpeng-brevo
 
-`BV="python3 /opt/data/profiles/xpeng/skills/xpeng-brevo/scripts/brevo.py"` — key
+Script `python3 /opt/data/profiles/xpeng/skills/xpeng-brevo/scripts/brevo.py` (always the
+full path; a command starting with a shell variable is rejected by the scanner) — key
 from `BREVO_API_KEY` (Railway var; never print it).
 
 ```bash
-$BV templates                               # ids: 815 Invitation · 816 Registration confirmed
-$BV events --email someone@example.com      # what Brevo did with that address (30 days)
-$BV events --days 7 --event hardBounces     # account-wide bounces of the week
-$BV blocked                                 # hard-bounced / unsubscribed addresses
-$BV send-template --template-id 816 --to a@b.c --params '{"firstName":"…", …}' --dry-run
+python3 /opt/data/profiles/xpeng/skills/xpeng-brevo/scripts/brevo.py templates                               # ids: 815 Invitation · 816 Registration confirmed
+python3 /opt/data/profiles/xpeng/skills/xpeng-brevo/scripts/brevo.py events --email someone@example.com      # what Brevo did with that address (30 days)
+python3 /opt/data/profiles/xpeng/skills/xpeng-brevo/scripts/brevo.py events --days 7 --event hardBounces     # account-wide bounces of the week
+python3 /opt/data/profiles/xpeng/skills/xpeng-brevo/scripts/brevo.py blocked                                 # hard-bounced / unsubscribed addresses
+python3 /opt/data/profiles/xpeng/skills/xpeng-brevo/scripts/brevo.py send-template --template-id 816 --to a@b.c --params '{"firstName":"…", …}' --dry-run
 ```
 
 ## When to use what

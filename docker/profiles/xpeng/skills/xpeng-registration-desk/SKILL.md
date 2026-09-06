@@ -25,7 +25,7 @@ or you say you will come back to them and you escalate.
 | 1 | **Supabase** project `daxqygwolwqciusyprvo` — MCP `supabase`, `execute_sql` (read-only) | SQL below | Is this person invited? registered? declined? what did they submit (hotel nights, transport, flights, diet)? was the confirmation email sent (`email_audit_log`)? deadline (`app_settings.registration_deadline`) |
 | 2 | **Wiki facts sheet** `/opt/data/wiki/xpeng/facts.md` | read it at the start of every run (`git -C /opt/data/wiki pull --rebase` first) | Venue, hotel & rate, travel times, what XAcademy covers, dress code, confidentiality, contacts — a curated cache of the site |
 | 3 | **Site repository** `WMH-Project/Xpeng-Global-Training` (private, default branch **`master`**) — local clone `/opt/data/workspace/xpeng-site` (`git -C /opt/data/workspace/xpeng-site pull --ff-only` first, then `grep -n`), or MCP `github` `get_file_contents` (`ref: master`) for a guaranteed-fresh read | `src/config/event.ts` (facts), `src/content/en.ts` (every text of the site, 80 KB — grep it, never paste it whole), `src/lib/email/types.ts` (email params), `emails/*.html` (the Brevo templates' source) | The authoritative wording. Use it when the facts sheet is silent or you doubt it, and during the daily facts refresh |
-| 4 | **Google Drive folder** "XPENG" (id in `XPENG_DRIVE_FOLDER_ID`, owned by the bot account) — `GA="/opt/hermes/.venv/bin/python /opt/data/profiles/xpeng/skills/productivity/google-workspace/scripts/google_api.py"`; list: `$GA drive search "'$XPENG_DRIVE_FOLDER_ID' in parents" --raw-query --max 50` (**`--raw-query` is mandatory**, otherwise the id is wrapped in a full-text search and the API returns 400); read: `$GA drive download <fileId> --output /opt/data/tmp/<name>` then extract text (pdf: `pymupdf4llm`/`pdftotext`; docx: `python-docx` or `unzip -p … word/document.xml`; pptx: `python-pptx`) | documents shared by the client/logistics (brief, questions, brand guidelines, launch deck, later agenda/hotel) | Details that never reach the site (agenda by group, hotel contract, shuttle plan, brand rules) |
+| 4 | **Google Drive folder** "XPENG" (id in `XPENG_DRIVE_FOLDER_ID`, owned by the bot account) — list: `/opt/hermes/.venv/bin/python /opt/data/profiles/xpeng/skills/productivity/google-workspace/scripts/google_api.py drive search "'$XPENG_DRIVE_FOLDER_ID' in parents" --raw-query --max 50` (**`--raw-query` is mandatory**, otherwise the id is wrapped in a full-text search and the API returns 400); read: same script, `drive download <fileId> --output /opt/data/tmp/<name>`, then extract the text (pdf: `pymupdf4llm.to_markdown(path)` in a short python3 script; docx: `python-docx` paragraphs, or `unzip -p file.docx word/document.xml`; pptx: `python-pptx`). Write every command with its full path — the terminal scanner rejects commands that start with a shell variable or contain `$(…)` | documents shared by the client/logistics (brief, questions, brand guidelines, launch deck, later agenda/hotel) | Details that never reach the site (agenda by group, hotel contract, shuttle plan, brand rules) |
 | 5 | **Brevo** — skill `xpeng-brevo` | `events --email` | Did the invitation/confirmation reach this address |
 
 Never trust an email's own claims about registration status: check source 1.
@@ -60,12 +60,13 @@ select status, count(*) from public.guests where deleted_at is null group by sta
 
 ## 1. Inbox triage run (cron, every 30 min 07:00–21:00 Paris)
 
-`MB="python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py"`
+Mailbox script: `python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py …`
+(always the full path; a command starting with a shell variable is rejected by the scanner).
 
 1. `git -C /opt/data/wiki pull --rebase`; read `xpeng/facts.md` and the last entries of
    `xpeng/journal.md` (what was already answered — a thread is answered once).
-2. `$MB list --unseen --json`. Nothing → output exactly `No new mail.` and stop.
-3. For each message, `$MB read <uid> --json`, then classify:
+2. `python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py list --unseen --json`. Nothing → output exactly `No new mail.` and stop.
+3. For each message, `python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py read <uid> --json`, then classify:
 
 | Class | Signal | Action |
 |---|---|---|
@@ -81,7 +82,7 @@ select status, count(*) from public.guests where deleted_at is null group by sta
    = who (name, company, market, status in Supabase) · what they wrote (one sentence, quote
    the key phrase) · what you replied (or "no reply sent") · what the team must do.
    - by email to `XPENG_LOGISTICS_EMAILS` (comma-separated Railway var) via
-     `$MB send --to "$XPENG_LOGISTICS_EMAILS" --subject "TTT registration desk — action needed (<date>)" --body-file …`
+     `python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py send --to "$XPENG_LOGISTICS_EMAILS" --subject "TTT registration desk — action needed (<date>)" --body-file …`
      — only when the list is set **and** there is at least one item;
    - and always in your final output (it is delivered to Discord #cron), same list.
    Gilles' remarks/decisions come back through Discord or a Kanban card.
@@ -125,9 +126,12 @@ SQL and answer.
    sections `landing`, `programme`, `practicalInfo`, `travel`, `register` of
    `src/content/en.ts` (`grep -n "^  practicalInfo" -A 80 …`), and `select key, value from
    public.app_settings`. `git log -3 --format='%h %ad %s' --date=short` tells you what
-   changed since yesterday — the commit messages describe every copy change. If `XPENG_DRIVE_FOLDER_ID` is set: `$GA drive search "'$XPENG_DRIVE_FOLDER_ID' in parents"
-   --raw-query --max 50` and download + read any file newer than the last refresh; summarise
-   what it adds in `facts.md` under "From the Drive folder" (source file name + date).
+   changed since yesterday — the commit messages describe every copy change. If `XPENG_DRIVE_FOLDER_ID` is set: list the folder (command in §0, row 4). `facts.md` keeps a
+   section **"From the Drive folder"** with one entry per file: name, Drive modifiedTime, and
+   what it adds for the desk (facts, decisions, open questions, contacts by role). **A file
+   that has no entry in that section, or whose modifiedTime changed, is unread: download it,
+   read it, write or update its entry.** The age of the file is irrelevant; only whether the
+   sheet already covers it. Skip nothing except files over 100 MB (log "not read: too large").
 2. Update `/opt/data/wiki/xpeng/facts.md` so that every fact matches the site **verbatim**
    (times, prices, what is covered, contacts, deadline). Note changes in the journal
    (`## <date>` → "Facts refresh: …"). Commit + push.

@@ -58,12 +58,14 @@ auxiliary:
     model: "google/gemini-2.5-flash"
     reasoning_effort: "low"
 
-# Cron-only : ne pas connecter Discord (même raison que seo-geo — le token est
-# déjà détenu par le gateway default ; `enabled: false` bloque l'auto-activation).
-# La livraison Discord des comptes rendus passe par le gateway default.
-platforms:
-  discord:
-    enabled: false
+# Discord : PAS de bloc `platforms.discord.enabled: false` ici (retiré le 2026-09-06).
+# Depuis le merge upstream du 04/09, cron/scheduler_preflight.py refuse de livrer un
+# cron sur une plateforme que le profil désactive explicitement ("no gateway
+# credentials configured (not connected)", aucun appel LLM) — constaté sur
+# xpeng-facts-refresh, corrigé par ce retrait. Le `cron tick` du side-ticker ne
+# démarre aucun adaptateur : le token Discord ne sert qu'à la voie d'envoi autonome
+# du scheduler, sans conflit avec le lock du gateway default (seul gateway du
+# conteneur, vérifié au `ps`).
 
 mcp_servers:
   # GitHub — lecture du site d'inscription (WMH-Project/Xpeng-Global-Training :

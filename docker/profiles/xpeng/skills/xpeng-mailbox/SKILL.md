@@ -14,9 +14,9 @@ metadata:
 # xpeng-mailbox
 
 One script, standard library only:
-`python3 ~/skills/xpeng-mailbox/scripts/mailbox.py <command>` — on Railway the skill
-lives at `/opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py`. Define
-`MB="python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py"` first.
+`python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py <command>`.
+Always write the full path: a command that starts with a shell variable (`$MB …`) or
+contains `$(…)` is rejected by the terminal security scanner in cron runs.
 
 Credentials come from the environment (`XPENG_MAIL_USER`, `XPENG_MAIL_PASSWORD`) or,
 by default, from the base64 file `/opt/data/secrets/ttt_imap_pass_b64` that the
@@ -26,16 +26,16 @@ Set `XPENG_MAIL_DRY_RUN=1` to see what would be sent without sending.
 ## Commands
 
 ```bash
-$MB folders                                   # IMAP folders (INBOX, Sent, …)
-$MB list --unseen                             # unread INBOX messages (uid, date, from, subject)
-$MB list --days 2 --json                      # last 2 days, machine-readable
-$MB search --from "@xiaopeng.com" --days 30   # filters: --from --subject --text --since --unseen
-$MB read <uid>                                # headers + text body (+ attachment names)
-$MB read <uid> --json                         # same, JSON (fields: from, subject, body, auto_submitted…)
-$MB reply <uid> --body-file /opt/data/tmp/reply.txt [--all] [--quote] [--cc a@b.c] [--draft]
-$MB send --to a@b.c[,d@e.f] --subject "…" --body-file /opt/data/tmp/mail.txt [--html-file …]
-$MB flag <uid> [<uid>…] --flags seen answered # or --remove
-$MB move <uid> --to "Archive"                 # copy + delete + expunge
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py folders                                   # IMAP folders (INBOX, Sent, …)
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py list --unseen                             # unread INBOX messages (uid, date, from, subject)
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py list --days 2 --json                      # last 2 days, machine-readable
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py search --from "@xiaopeng.com" --days 30   # filters: --from --subject --text --since --unseen
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py read <uid>                                # headers + text body (+ attachment names)
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py read <uid> --json                         # same, JSON (fields: from, subject, body, auto_submitted…)
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py reply <uid> --body-file /opt/data/tmp/reply.txt [--all] [--quote] [--cc a@b.c] [--draft]
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py send --to a@b.c[,d@e.f] --subject "…" --body-file /opt/data/tmp/mail.txt [--html-file …]
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py flag <uid> [<uid>…] --flags seen answered # or --remove
+python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py move <uid> --to "Archive"                 # copy + delete + expunge
 ```
 
 `--draft` (on `reply` and `send`) stores the message in the webmail Drafts folder instead of
@@ -55,5 +55,5 @@ with the Message-ID — quote it in the journal.
 - Auto-replies: `read --json` exposes `auto_submitted`; a value other than empty/`no`
   (or a subject starting "Automatic reply"/"Out of office"/"Undeliverable") is never
   answered.
-- Before re-sending after an error, check the Sent folder (`$MB --folder Sent list --days 1`):
+- Before re-sending after an error, check the Sent folder (`python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/mailbox.py --folder Sent list --days 1`):
   SMTP may have succeeded while the Sent copy failed.

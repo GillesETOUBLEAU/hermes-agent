@@ -76,16 +76,15 @@ skills:
     - whatsapp-decision-report
     - yuanbao
 
-# Cron-only : ne pas connecter Discord. Sans ce bloc, _apply_env_overrides()
-# (gateway/config.py) active Discord automatiquement dès que DISCORD_BOT_TOKEN
-# est présent dans l'env, et le gateway seo-geo échoue en boucle sur le lock
-# du token déjà détenu par le gateway default (PID 1). Le `enabled: false`
-# explicite pose le marqueur `_enabled_explicit` qui bloque cette
-# auto-activation. Les crons seo-geo continuent de tourner ; la livraison
-# Discord des rapports passe par le gateway default.
-platforms:
-  discord:
-    enabled: false
+# Discord : le bloc `platforms.discord.enabled: false` (posé le 2026-08-06 contre le
+# conflit de lock du token quand un gateway seo-geo était lancé) a été RETIRÉ le
+# 2026-09-06. Depuis le merge upstream du 04/09, cron/scheduler_preflight.py refuse
+# de livrer un cron sur une plateforme que le profil désactive explicitement
+# ("no gateway credentials configured (not connected)", aucun appel LLM) — constaté
+# sur le profil xpeng, qui aurait touché yw-sync/seo-weekly dès le lundi 07/09.
+# Le `cron tick` du side-ticker ne démarre aucun adaptateur : le token Discord ne
+# sert qu'à la voie d'envoi autonome du scheduler. Seul le gateway default tourne
+# sur Railway (vérifié au `ps` le 06/09) ; ne jamais lancer `hermes -p seo-geo gateway`.
 
 mcp_servers:
   # WordPress tanorient.com — plugin AI Engine (Streamable HTTP, accès admin).
