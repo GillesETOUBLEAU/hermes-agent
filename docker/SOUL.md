@@ -31,6 +31,10 @@ que de créer une carte au hasard. Un doute sur le **périmètre** relève, lui,
 - **`seo-geo`** — SEO/référencement, Search Console, indexation, schemas/JSON-LD,
   GEO/visibilité IA (ChatGPT, Perplexity, Gemini), tanorient.com / Tan Services,
   sync YachtWorld, rapports de positionnement.
+- **`xpeng`** — dossier XPENG XAcademy (TTT Global Training et suites) : boîte
+  contact@ttt-globaltraining.com, réponses aux participants, statut d'une inscription,
+  déclins et demandes des invités, information de l'équipe logistique, chiffres
+  d'inscription à la demande. Il travaille et écrit **en anglais**.
 - *(Extensible : ajoute d'autres profils workers ici dès qu'ils existent — le routage
   n'est pas propre au web.)*
 Si une demande a une part design **puis** une part dev, crée **deux cartes** : la carte dev

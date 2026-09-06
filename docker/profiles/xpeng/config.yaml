@@ -1,0 +1,140 @@
+# Profil "xpeng" — assistant inscriptions & information des invités, dossier
+# XPENG XAcademy (TTT Training 17–18/09/2026, puis les événements suivants).
+# Overlay copié par docker/entrypoint.sh au boot Railway (config.yaml TOUJOURS
+# rafraîchi depuis ce template ; toute modif passe par le repo + redeploy).
+# Persona : SOUL.md (anglais — toutes les communications du dossier sont en anglais).
+# Les `${VAR}` sont interpolées depuis l'environnement du process (injecté par
+# Railway). ⚠️ Une VAR absente laisse le littéral `${VAR}` en place (401 silencieux).
+#
+# VARs Railway attendues (en plus des communes) :
+#   XPENG_MAIL_USER / XPENG_MAIL_PASSWORD  — boîte contact@ttt-globaltraining.com
+#                                            (IMAP/SMTP PlanetHoster, skill xpeng-mailbox)
+#   XPENG_LOGISTICS_EMAILS                 — destinataires du digest logistique (virgules)
+#   XPENG_DRIVE_FOLDER_ID                  — dossier Google Drive du dossier (partagé au
+#                                            compte pippaetoubleau@gmail.com)
+#   BREVO_API_KEY                          — compte Brevo TTT (templates 815/816, events)
+# ⚠️ Ne PAS nommer les variables mail EMAIL_* : ces noms sont dans la blocklist du
+# terminal Hermes (tools/environments/local_env_policy.py) et seraient masqués.
+
+# Modèle : Claude Opus 4.8 en direct Anthropic (choix Gilles 2026-09-06, critère =
+# respect strict des consignes : jamais inventer un fait, anglais seul, escalade).
+# Même modèle que l'orchestrateur, dont la discipline est prouvée sur ce déploiement.
+# Volume faible (quelques mails/jour, cache 1 h) : le coût n'est pas le sujet.
+# Alternatives évaluées : Sonnet 5 (moins cher, discipline non prouvée ici),
+# Opus 5 (system card : peut relayer des affirmations sans les vérifier).
+model:
+  default: "claude-opus-4-8"
+  provider: "anthropic"
+
+agent:
+  reasoning_effort: "high"
+
+prompt_caching:
+  cache_ttl: "1h"
+
+# Bascule mi-session si l'API Anthropic directe sature : même Opus 4.8 via
+# OpenRouter (pas de dérive de comportement), puis Sonnet 5 direct.
+fallback_providers:
+  - provider: openrouter
+    model: "anthropic/claude-opus-4.8"
+  - provider: anthropic
+    model: "claude-sonnet-5"
+
+terminal:
+  backend: local
+
+# Worker Kanban : reçoit des cartes du profil orchestrateur (assignee: xpeng).
+toolsets:
+  - kanban
+
+# Approbations shell arbitrées par un side-model — indispensable pour les runs
+# cron non supervisés (relève de boîte toutes les 30 min).
+auxiliary:
+  approval:
+    provider: "openrouter"
+    model: "google/gemini-2.5-flash"
+  compression:
+    provider: "openrouter"
+    model: "google/gemini-2.5-flash"
+    reasoning_effort: "low"
+
+# Cron-only : ne pas connecter Discord (même raison que seo-geo — le token est
+# déjà détenu par le gateway default ; `enabled: false` bloque l'auto-activation).
+# La livraison Discord des comptes rendus passe par le gateway default.
+platforms:
+  discord:
+    enabled: false
+
+mcp_servers:
+  # GitHub — lecture du site d'inscription (WMH-Project/Xpeng-Global-Training :
+  # src/content/en.ts = tout le contenu du site, src/config/event.ts = faits
+  # de l'événement). Serveur MCP officiel hébergé, PAT classique en Bearer.
+  github:
+    url: "https://api.githubcopilot.com/mcp/"
+    headers:
+      Authorization: "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
+    enabled: true
+
+  # Supabase — projet xpeng-ttt-training UNIQUEMENT (--project-ref), lecture
+  # seule : guests, registrations, email_audit_log, app_settings. L'assistant
+  # n'écrit JAMAIS en base — les modifications passent par le back-office.
+  supabase:
+    command: "npx"
+    args: ["-y", "@supabase/mcp-server-supabase@latest", "--read-only",
+           "--project-ref", "daxqygwolwqciusyprvo"]
+    env:
+      SUPABASE_ACCESS_TOKEN: "${SUPABASE_ACCESS_TOKEN}"
+    enabled: true
+
+  # DeepL — serveur MCP hébergé, auth OAuth 2.1 partagée entre profils
+  # (lien mcp-tokens/ posé par l'entrypoint). Utile si un invité écrit dans une
+  # autre langue : comprendre, puis répondre en anglais.
+  deepl:
+    url: "https://mcp.deepl.com/v1/mcp"
+    auth: oauth
+    enabled: true
+
+skills:
+  external_dirs:
+    - /opt/data/skills
+  # Skills désactivées (2026-08-05) — liste partagée par tous les profils,
+  # rafraîchie depuis ce template à chaque boot Railway (source de vérité).
+  disabled:
+    - airtable
+    - architecture-diagram
+    - arxiv
+    - ascii-art
+    - ascii-video
+    - audio-and-music
+    - axolotl
+    - baoyu-article-illustrator
+    - baoyu-comic
+    - baoyu-infographic
+    - blogwatcher
+    - evaluating-llms-harness
+    - excalidraw
+    - find-nearby
+    - fine-tuning-with-trl
+    - gguf-quantization
+    - gif-search
+    - godmode
+    - grpo-rl-training
+    - huggingface-hub
+    - linear
+    - llama-cpp
+    - manim-video
+    - minecraft-modpack-server
+    - ml-paper-writing
+    - modal-serverless-gpu
+    - notion
+    - openhue
+    - peft-fine-tuning
+    - petdex
+    - pokemon-player
+    - polymarket
+    - research-paper-writing
+    - stable-diffusion-image-generation
+    - unsloth
+    - weights-and-biases
+    - whatsapp-decision-report
+    - yuanbao

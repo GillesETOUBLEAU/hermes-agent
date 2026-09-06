@@ -214,7 +214,7 @@ done
 # the templates) forever. Off Railway both stay seed-only so local edits survive.
 # The shared kanban board at
 # $HERMES_HOME/kanban.db lets the profiles delegate work to each other.
-for _p in web-design web-dev wmh-offers seo-geo; do
+for _p in web-design web-dev wmh-offers seo-geo xpeng; do
     _pdir="$HERMES_HOME/profiles/$_p"
     _tmpl="$INSTALL_DIR/docker/profiles/$_p"
     if [ ! -d "$_pdir" ]; then
@@ -224,6 +224,8 @@ for _p in web-design web-dev wmh-offers seo-geo; do
             _desc="Propositions digitales — pipeline offres, devis, PPTX WMH"
         elif [ "$_p" = "seo-geo" ]; then
             _desc="Suivi SEO & GEO — Search Console, WordPress, visibilité IA (tanorient.com)"
+        elif [ "$_p" = "xpeng" ]; then
+            _desc="XPENG registration desk — inbox, participants, logistics (TTT Global Training)"
         else
             _desc="Dev full-stack web — GitHub, Supabase, Netlify"
         fi
@@ -556,7 +558,7 @@ if [ -n "$RAILWAY_ENVIRONMENT" ]; then
     (
         while true; do
             sleep 60
-            for _cp in seo-geo; do
+            for _cp in seo-geo xpeng; do
                 _cplog="$HERMES_HOME/profiles/$_cp/logs/cron-tick.log"
                 # crude rotation: keep the log under ~1 MB
                 if [ -f "$_cplog" ] && [ "$(wc -c < "$_cplog")" -gt 1048576 ]; then
@@ -566,7 +568,7 @@ if [ -n "$RAILWAY_ENVIRONMENT" ]; then
             done
         done
     ) &
-    echo "[entrypoint] cron side-ticker started for profiles: seo-geo"
+    echo "[entrypoint] cron side-ticker started for profiles: seo-geo xpeng"
 fi
 
 # Optionally start `hermes dashboard` as a side-process.
