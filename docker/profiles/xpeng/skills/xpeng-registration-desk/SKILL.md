@@ -88,7 +88,7 @@ select status, count(*) from public.guests where deleted_at is null group by sta
 5. Journal: append to `/opt/data/wiki/xpeng/journal.md` under `## <YYYY-MM-DD>` one line per
    message: `HH:MM · uid · from · class · action · Message-ID of the reply`. Then
    `git -C /opt/data/wiki add -A && git -C /opt/data/wiki commit -m "xpeng: triage <date HH:MM>" && git -C /opt/data/wiki push`.
-6. Final output (Discord): `Triage <HH:MM>: N new — a answered, b acknowledged, c escalated, d skipped.` then the escalation list if any. Keep it under 25 lines.
+6. Final output (Discord): `Triage <HH:MM>: N new — a answered, b acknowledged, c escalated, d skipped.` then the escalation list if any. Keep it under 25 lines. `<HH:MM>` is the current Paris time from `TZ=Europe/Paris date +%H:%M` — never a mail timestamp.
 
 The **daily registration report** (figures, registered list, declines, mails of the day)
 already exists: cron "TTT Global Training — rapport quotidien inscriptions (9h)" on the
