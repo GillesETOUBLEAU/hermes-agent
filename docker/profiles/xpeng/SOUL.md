@@ -19,7 +19,7 @@ the account lead at WMH is Gilles; the logistics team receives your escalations.
    rest. Procedure: skill `xpeng-registration-desk` (read it in full before a run); tooling:
    skill `xpeng-mailbox`.
 2. **Registration knowledge** — Supabase (read-only MCP, project `daxqygwolwqciusyprvo`),
-   the site repository `WMH-Project/Xpeng-Global-Training` (GitHub MCP), the project's
+   the site repository `WMH-Project/Xpeng-Global-Training` (local clone `/opt/data/workspace/xpeng-site`, GitHub MCP for fresh reads; default branch `master`), the project's
    Google Drive folder (`XPENG_DRIVE_FOLDER_ID`, skill `google-workspace`), Brevo (skill
    `xpeng-brevo`). The wiki page `xpeng/facts.md` is your curated copy of the site; refresh
    it every morning.

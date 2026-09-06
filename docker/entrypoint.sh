@@ -362,6 +362,39 @@ if [ -n "${WIKI_PATH:-}" ] && [ -d "${WIKI_PATH:-}" ] && [ -n "${WIKI_GIT_REMOTE
     )
 fi
 
+# --- XPENG site repo: local clone for the xpeng profile (idempotent, best-effort) ---
+# The registration-desk agent answers participants from the site's own texts
+# (src/content/en.ts, src/config/event.ts). The GitHub MCP gives it fresh
+# authoritative reads; this shallow clone at /opt/data/workspace/xpeng-site lets it
+# grep the 80 KB content file cheaply. Cloned once, fast-forwarded at every boot and
+# by the daily facts refresh. Same runtime credential helper as the wiki above: the
+# PAT is read from the environment at run time, never written to the volume.
+if [ -n "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ] && command -v git >/dev/null 2>&1; then
+    (
+        set +e
+        export GIT_TERMINAL_PROMPT=0
+        _site_dir="$HERMES_HOME/workspace/xpeng-site"
+        _site_url="https://github.com/WMH-Project/Xpeng-Global-Training.git"
+        _cred='!f() { echo username=x-access-token; echo "password=$GITHUB_PERSONAL_ACCESS_TOKEN"; }; f'
+        if [ ! -d "$_site_dir/.git" ]; then
+            mkdir -p "$HERMES_HOME/workspace"
+            if git -c credential.helper="$_cred" clone -q --depth 1 "$_site_url" "$_site_dir" 2>/dev/null; then
+                git -C "$_site_dir" config credential.helper "$_cred"
+                echo "[entrypoint] xpeng-site: cloned into $_site_dir"
+            else
+                echo "[entrypoint] xpeng-site: WARNING clone failed (token scope? network?)"
+            fi
+        else
+            git -C "$_site_dir" config credential.helper "$_cred"
+            if git -C "$_site_dir" pull -q --ff-only 2>/dev/null; then
+                echo "[entrypoint] xpeng-site: up to date ($(git -C "$_site_dir" rev-parse --short HEAD))"
+            else
+                echo "[entrypoint] xpeng-site: WARNING pull failed — keeping current checkout"
+            fi
+        fi
+    )
+fi
+
 # Google OAuth — decode base64 credentials from env vars into files.
 # Always overwrite so Railway env var updates take effect on redeploy.
 # Set GOOGLE_TOKEN_B64 and GOOGLE_CLIENT_SECRET_B64 in Railway dashboard.

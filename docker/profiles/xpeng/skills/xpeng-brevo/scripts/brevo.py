@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 import urllib.error
 import urllib.parse
@@ -112,6 +113,7 @@ def cmd_send_template(args) -> None:
 
 
 def main() -> None:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # `| head` must not traceback
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("templates").set_defaults(func=cmd_templates)
