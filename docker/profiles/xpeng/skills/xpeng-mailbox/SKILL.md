@@ -32,12 +32,14 @@ $MB list --days 2 --json                      # last 2 days, machine-readable
 $MB search --from "@xiaopeng.com" --days 30   # filters: --from --subject --text --since --unseen
 $MB read <uid>                                # headers + text body (+ attachment names)
 $MB read <uid> --json                         # same, JSON (fields: from, subject, body, auto_submitted…)
-$MB reply <uid> --body-file /opt/data/tmp/reply.txt [--all] [--quote] [--cc a@b.c]
+$MB reply <uid> --body-file /opt/data/tmp/reply.txt [--all] [--quote] [--cc a@b.c] [--draft]
 $MB send --to a@b.c[,d@e.f] --subject "…" --body-file /opt/data/tmp/mail.txt [--html-file …]
 $MB flag <uid> [<uid>…] --flags seen answered # or --remove
 $MB move <uid> --to "Archive"                 # copy + delete + expunge
 ```
 
+`--draft` (on `reply` and `send`) stores the message in the webmail Drafts folder instead of
+sending it — for a human to review and send; the original is then NOT flagged, flag it yourself.
 `reply` threads correctly (In-Reply-To/References), addresses the sender's Reply-To
 (or From), prefixes `Re:`, copies the message to the Sent folder, then flags the
 original **Seen + Answered** (unless `--no-mark`). Output of any send is one JSON line

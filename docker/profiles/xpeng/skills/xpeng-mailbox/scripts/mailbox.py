@@ -43,6 +43,7 @@ SMTP_PORT = int(os.environ.get("XPENG_MAIL_SMTP_PORT", "465"))
 PASSWORD_FILE = os.environ.get("XPENG_MAIL_PASSWORD_FILE", "/opt/data/secrets/ttt_imap_pass_b64")
 DRY_RUN = os.environ.get("XPENG_MAIL_DRY_RUN", "") not in ("", "0", "false")
 SENT_CANDIDATES = ("Sent", "INBOX.Sent", "Sent Items", "Sent Messages", "INBOX.Sent Items")
+DRAFT_CANDIDATES = ("Drafts", "INBOX.Drafts", "Draft", "INBOX.Draft")
 
 
 def die(msg: str, code: int = 2) -> None:
@@ -157,7 +158,7 @@ def envelope(m: imaplib.IMAP4_SSL, uid: str) -> dict:
     }
 
 
-def sent_folder(m: imaplib.IMAP4_SSL) -> str | None:
+def _folder_names(m: imaplib.IMAP4_SSL) -> list[str]:
     typ, data = m.list()
     names = []
     for line in data or []:
@@ -167,13 +168,37 @@ def sent_folder(m: imaplib.IMAP4_SSL) -> str | None:
         mm = re.search(r'"([^"]*)"\s*$|(\S+)\s*$', s)
         if mm:
             names.append(mm.group(1) or mm.group(2))
-    for cand in SENT_CANDIDATES:
+    return names
+
+
+def _find_folder(m: imaplib.IMAP4_SSL, candidates: tuple, keyword: str) -> str | None:
+    names = _folder_names(m)
+    for cand in candidates:
         if cand in names:
             return cand
     for n in names:
-        if "sent" in n.lower():
+        if keyword in n.lower():
             return n
     return None
+
+
+def sent_folder(m: imaplib.IMAP4_SSL) -> str | None:
+    return _find_folder(m, SENT_CANDIDATES, "sent")
+
+
+def save_draft(msg: EmailMessage) -> None:
+    """Store the message in the Drafts folder instead of sending it (review in the webmail)."""
+    m = imap()
+    folder = _find_folder(m, DRAFT_CANDIDATES, "draft")
+    if not folder:
+        m.logout()
+        die("no Drafts folder found on the server")
+    typ, _ = m.append(f'"{folder}"', "\\Draft", imaplib.Time2Internaldate(datetime.now()), msg.as_bytes())
+    m.logout()
+    if typ != "OK":
+        die("could not append the draft")
+    print(json.dumps({"draft_saved": True, "folder": folder, "to": msg["To"], "subject": msg["Subject"],
+                      "message_id": msg["Message-ID"]}))
 
 
 def _split(csv: str | None) -> list[str]:
@@ -331,6 +356,9 @@ def cmd_reply(args) -> None:
     msg = build(subject, body, to, cc, html=read_file(args.html_file) if args.html_file else None,
                 in_reply_to=(orig.get("Message-ID") or "").strip() or None,
                 references=(orig.get("References") or "").strip() or None)
+    if args.draft:
+        save_draft(msg)
+        return
     deliver(msg, to + cc)
     if not DRY_RUN and args.mark:
         m = imap()
@@ -343,6 +371,9 @@ def cmd_send(args) -> None:
     to, cc = _split(args.to), _split(args.cc)
     body = read_file(args.body_file).rstrip() + "\n"
     msg = build(args.subject, body, to, cc, html=read_file(args.html_file) if args.html_file else None)
+    if args.draft:
+        save_draft(msg)
+        return
     deliver(msg, to + cc)
 
 
@@ -404,6 +435,7 @@ def main() -> None:
     s.add_argument("--all", action="store_true", help="reply-all (other To/Cc go to Cc)")
     s.add_argument("--quote", action="store_true", help="quote the original below the reply")
     s.add_argument("--no-mark", dest="mark", action="store_false", help="do not flag original Seen+Answered")
+    s.add_argument("--draft", action="store_true", help="save to the Drafts folder instead of sending")
     s.set_defaults(func=cmd_reply)
 
     s = sub.add_parser("send", help="send a new message")
@@ -412,6 +444,7 @@ def main() -> None:
     s.add_argument("--subject", required=True)
     s.add_argument("--body-file", required=True)
     s.add_argument("--html-file")
+    s.add_argument("--draft", action="store_true", help="save to the Drafts folder instead of sending")
     s.set_defaults(func=cmd_send)
 
     s = sub.add_parser("flag", help="add/remove flags")
