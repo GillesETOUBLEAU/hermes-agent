@@ -46,6 +46,14 @@ gateway:
       no_thread_channels:            # salons de notification : réponse à plat
         - "1545105470002303016"      # #cron
         - "1545105517033037915"      # #kanban
+      # Crons "continuable" (attach_to_session: true — veille X, Attila, TTT, trafic
+      # WMH, seo-weekly) livrent PAR DÉFAUT dans un fil auto-créé sous #cron
+      # (cron/scheduler_delivery.py:_resolve_cron_surface_mode, défaut "thread"), pas
+      # dans le salon lui-même. Gilles ne voit jamais ces fils → rapports "muets".
+      # Forcer le dépôt à plat DANS #cron (t_03037758, régressé le 2026-09-06 : un
+      # fix identique posé seulement dans /opt/data/config.yaml a été effacé par le
+      # prochain redeploy — l'entrypoint recopie CE fichier à chaque boot Railway).
+      cron_continuable_surface: in_channel
 
 # L'orchestrateur n'a qu'une sortie : la carte Kanban. Le preset Discord lui
 # donnait aussi `delegate_task` — constaté le 2026-09-05 : il a lancé un
