@@ -25,7 +25,7 @@ or you say you will come back to them and you escalate.
 | 1 | **Supabase** project `daxqygwolwqciusyprvo` — MCP `supabase`, `execute_sql` (read-only) | SQL below | Is this person invited? registered? declined? what did they submit (hotel nights, transport, flights, diet)? was the confirmation email sent (`email_audit_log`)? deadline (`app_settings.registration_deadline`) |
 | 2 | **Wiki facts sheet** `/opt/data/wiki/xpeng/facts.md` | read it at the start of every run (`git -C /opt/data/wiki pull --rebase` first) | Venue, hotel & rate, travel times, what XAcademy covers, dress code, confidentiality, contacts — a curated cache of the site |
 | 3 | **Site repository** `WMH-Project/Xpeng-Global-Training` (private, default branch **`master`**) — local clone `/opt/data/workspace/xpeng-site` (`git -C /opt/data/workspace/xpeng-site pull --ff-only` first, then `grep -n`), or MCP `github` `get_file_contents` (`ref: master`) for a guaranteed-fresh read | `src/config/event.ts` (facts), `src/content/en.ts` (every text of the site, 80 KB — grep it, never paste it whole), `src/lib/email/types.ts` (email params), `emails/*.html` (the Brevo templates' source) | The authoritative wording. Use it when the facts sheet is silent or you doubt it, and during the daily facts refresh |
-| 4 | **Google Drive folder** of the project (id in `XPENG_DRIVE_FOLDER_ID`) — skill `google-workspace`, `google_api.py drive search/download` | documents shared by the client/logistics (agenda, hotel, briefs) | Details that never reach the site (agenda by group, hotel contract, shuttle plan) |
+| 4 | **Google Drive folder** "XPENG" (id in `XPENG_DRIVE_FOLDER_ID`, owned by the bot account) — `GA="/opt/hermes/.venv/bin/python /opt/data/profiles/xpeng/skills/productivity/google-workspace/scripts/google_api.py"`; list: `$GA drive search "'$XPENG_DRIVE_FOLDER_ID' in parents" --raw-query --max 50` (**`--raw-query` is mandatory**, otherwise the id is wrapped in a full-text search and the API returns 400); read: `$GA drive download <fileId> --output /opt/data/tmp/<name>` then extract text (pdf: `pymupdf4llm`/`pdftotext`; docx: `python-docx` or `unzip -p … word/document.xml`; pptx: `python-pptx`) | documents shared by the client/logistics (brief, questions, brand guidelines, launch deck, later agenda/hotel) | Details that never reach the site (agenda by group, hotel contract, shuttle plan, brand rules) |
 | 5 | **Brevo** — skill `xpeng-brevo` | `events --email` | Did the invitation/confirmation reach this address |
 
 Never trust an email's own claims about registration status: check source 1.
@@ -125,8 +125,9 @@ SQL and answer.
    sections `landing`, `programme`, `practicalInfo`, `travel`, `register` of
    `src/content/en.ts` (`grep -n "^  practicalInfo" -A 80 …`), and `select key, value from
    public.app_settings`. `git log -3 --format='%h %ad %s' --date=short` tells you what
-   changed since yesterday — the commit messages describe every copy change. If `XPENG_DRIVE_FOLDER_ID` is set: `google_api.py drive search
-   "'<id>' in parents"` and download any file newer than the last refresh.
+   changed since yesterday — the commit messages describe every copy change. If `XPENG_DRIVE_FOLDER_ID` is set: `$GA drive search "'$XPENG_DRIVE_FOLDER_ID' in parents"
+   --raw-query --max 50` and download + read any file newer than the last refresh; summarise
+   what it adds in `facts.md` under "From the Drive folder" (source file name + date).
 2. Update `/opt/data/wiki/xpeng/facts.md` so that every fact matches the site **verbatim**
    (times, prices, what is covered, contacts, deadline). Note changes in the journal
    (`## <date>` → "Facts refresh: …"). Commit + push.
