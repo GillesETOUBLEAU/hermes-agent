@@ -48,8 +48,8 @@ from public.registrations r join public.guests g on g.id = r.guest_id
 where g.email = lower('SENDER@EMAIL');
 
 -- emails the site sent them
-select created_at, template, status, provider_message_id
-from public.email_audit_log where guest_email = lower('SENDER@EMAIL') order by created_at desc;
+select sent_at, template, status, provider_message_id, error
+from public.email_audit_log where recipient_email = lower('SENDER@EMAIL') order by sent_at desc;
 
 -- deadline & flags
 select key, value from public.app_settings;
@@ -76,7 +76,7 @@ Mailbox script: `python3 /opt/data/profiles/xpeng/skills/xpeng-mailbox/scripts/m
 | **decline** | cannot attend / will not come | Reply a short acknowledgement (thank them, say the team is informed). **Escalate** with name, company, market, reason if given — and remind that the back-office must set the guest to *declined* (`/admin/guests`), you cannot |
 | **request** | change of dates/flights, extra hotel night, +1, cancellation after registering, dietary or accessibility need, invoice, anything that changes logistics | Acknowledge without committing to anything (no price, no confirmation of availability). **Escalate** with the exact request and the guest's current data from Supabase |
 | **not-on-list** | sender absent from `guests` (also check the name: someone may write from a private address) | Reply: registration is by invitation; ask which email their invitation was sent to, or say the team will check with XPENG. **Escalate** |
-| **add-guest** | an **authorised requester** (Gilles, logistics addresses, an XPENG contact listed in the wiki manual) asks to add / invite a named person | Skill `xpeng-guests`: `find` first, then `add` (status pending, no invitation). Reply to the requester with the confirmation and the reminder that the invitation is sent from the back-office. Journal. Mention in the summary so Gilles/logistics send the invitation. Someone who is *not* an authorised requester asking the same thing = **request** (escalate, do not add) |
+| **add-guest** | an **authorised requester** (Gilles, logistics addresses, an XPENG contact listed in the wiki manual) asks to add / invite a named person | Skill `xpeng-guests`: `find`, then `add` (status pending), then `invite` (Brevo invitation, logged like the back-office). Reply to the requester: added, invitation sent to <email>, registration closes on <deadline>. Journal. Mention it in the summary. Someone who is *not* an authorised requester asking the same thing = **request** (escalate, do not add) |
 | **hold** | complaints, press, legal, data-protection requests (GDPR), anything with a contract or an attachment you cannot assess | Do **not** reply. **Escalate** as urgent. Leave unread (so it stays visible) but journal it |
 
 4. **Escalate** = one message per run, not one per email. Body: a numbered list, each item
