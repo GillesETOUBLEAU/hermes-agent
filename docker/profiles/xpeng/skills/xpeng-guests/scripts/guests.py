@@ -59,7 +59,10 @@ def token() -> str:
 def query(sql: str):
     req = urllib.request.Request(API, data=json.dumps({"query": sql}).encode(), method="POST",
                                  headers={"Authorization": f"Bearer {token()}",
-                                          "Content-Type": "application/json"})
+                                          "Content-Type": "application/json",
+                                          # Cloudflare in front of api.supabase.com answers
+                                          # HTTP 403 "error code: 1010" to urllib's default UA.
+                                          "User-Agent": "hermes-xpeng-guests/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=40) as r:
             body = json.loads(r.read() or b"[]")
