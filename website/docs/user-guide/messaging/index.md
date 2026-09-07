@@ -246,6 +246,12 @@ Semantics are honest at-least-once:
   may not have received it) is redelivered with a visible
   "♻️ Recovered reply — … may be a duplicate" prefix. Ambiguity is labeled,
   never silently resent.
+- A final send refused by **flood control** (such as Telegram rate limits) is retried automatically
+  after the recorded penalty expires, without requiring a reconnect or restart.
+  A restart during the penalty adopts the stored reply without spending a retry
+  attempt or re-running the agent. Retries retain the original bot profile, chat
+  and thread. A rate-limit recovery prefix warns that earlier chunks may already
+  have arrived; the ledger cannot infer partial delivery from message length.
 - Redelivery is bounded: 3 attempts, 24-hour freshness, then the row is
   abandoned. Delivered rows are pruned after 7 days.
 
@@ -405,7 +411,7 @@ Send a message while the agent is working to correct the active turn:
 
 ### Queue vs interrupt vs steer (busy-input mode)
 
-By default, messaging a busy agent redirects its active turn. Two other modes are available:
+By default, messaging a busy agent redirects its active turn (a running foreground terminal command is moved to the background rather than killed, so your message is read immediately). Two other modes are available:
 
 - `queue` — follow-up messages wait and run as the next turn after the current task finishes.
 - `steer` — follow-up messages are injected into the current run via `/steer`, arriving at the agent after the next tool call. No interrupt, no new turn. Falls back to `queue` behavior if the agent hasn't started yet.
