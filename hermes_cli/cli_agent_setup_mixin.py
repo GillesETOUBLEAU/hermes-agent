@@ -518,7 +518,7 @@ class CLIAgentSetupMixin:
                 requested_provider=runtime.get("requested_provider"),
                 api_mode=runtime.get("api_mode"), acp_command=runtime.get("command"),
                 acp_args=runtime.get("args"), credential_pool=runtime.get("credential_pool"),
-                max_tokens=self.max_tokens, max_iterations=self.max_turns,
+                max_iterations=self.max_turns,
                 run_budget_seconds=getattr(self, "run_budget_seconds", None),
                 enabled_toolsets=self.enabled_toolsets, disabled_toolsets=self.disabled_toolsets,
                 verbose_logging=self.verbose, quiet_mode=not self.verbose,
@@ -556,10 +556,10 @@ class CLIAgentSetupMixin:
             # ``cli._active_agent_ref`` None forever — so memory shutdown never ran on /exit (#49287).
             import cli as _cli
             _cli._active_agent_ref = self.agent
-            # Route agent status output through prompt_toolkit so ANSI escapes
-            # aren't garbled by patch_stdout's StdoutProxy.
-            # See #2262.
-            self.agent._print_fn = _cprint
+            # Route agent status output through prompt_toolkit so ANSI escapes aren't garbled by
+            # patch_stdout's StdoutProxy (#2262), holding lines while a response box streams so a
+            # subagent/background completion notice never splits the reply mid-paragraph.
+            self.agent._print_fn = self._agent_status_print
             # Hydrate credits notices at session OPEN (parity with the TUI) so a depletion
             # warning shows before the first message. Idempotent + fail-open in the helper.
             try:

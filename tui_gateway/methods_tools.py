@@ -6,6 +6,7 @@ Helper names must not collide with server.py's own (``_cmd_`` / ``_toolset_`` / 
 """
 
 import sys
+from pathlib import Path
 
 from .method_ctx import HandlerRegistry, bind_module
 
@@ -148,10 +149,6 @@ def _rewind_or_err(rid, session, keep: int, value_err: tuple, fail_prefix: str, 
         return None, _err(rid, value_err[0], f"{value_err[1]}{exc}")
     except Exception as exc:
         return None, _err(rid, 5008, f"{fail_prefix}{exc}")
-
-
-def _clip(text: str, n: int = 120) -> str:
-    return text[:n] + ("…" if len(text) > n else "")
 
 
 def _exec_out(rid, output: str) -> dict:
@@ -376,7 +373,7 @@ def _catalog_quick_commands(cat: _Catalog) -> None:
         qtype = qc.get("type", "")
         default_desc = {"exec": f"exec: {qc.get('command', '')}", "alias": f"alias → {qc.get('target', '')}"}
         desc = str(qc.get("description") or default_desc.get(qtype, qtype or "quick command"))
-        cat.add(f"/{qname}", _clip(desc), "User commands")
+        cat.add(f"/{qname}", desc, "User commands")
 
 
 def _catalog_plugin_commands(cat: _Catalog) -> None:
@@ -387,7 +384,7 @@ def _catalog_plugin_commands(cat: _Catalog) -> None:
         key = f"/{pname}"
         if not isinstance(info, dict) or key.lower() in cat.canon:
             continue
-        cat.add(key, _clip(str(info.get("description") or "Plugin command")), "Plugin commands")
+        cat.add(key, str(info.get("description") or "Plugin command"), "Plugin commands")
         mode = info.get("argument_mode")
         if mode not in {"options", "text", "mixed"}:
             mode = "text" if str(info.get("args_hint") or "").strip() else None
@@ -398,7 +395,7 @@ def _catalog_skills(cat: _Catalog, skills: dict[str, dict]) -> None:
     """Append skill pairs and fill ``skills`` = ``{key: {usage, origin}}`` (every consumer ranks by them)."""
     usage, origin_of = _skill_usage_lookup()
     for k, info in sorted(_tools_mod("agent.skill_commands").scan_skill_commands().items()):
-        cat.pairs.append([k, _clip(str(info.get("description", "Skill")))])
+        cat.pairs.append([k, str(info.get("description", "Skill"))])
         name = str(info.get("name") or k.lstrip("/"))
         skills[k] = {"usage": usage(name), "origin": origin_of(name)}
 
@@ -984,6 +981,23 @@ def _(rid, params: dict) -> dict:
 
 @_rpc("tools.configure", 5035)
 def _(rid, params: dict) -> dict:
+    sid = params.get("session_id", "")
+    session = None
+    if sid:
+        session, err = _sess_nowait(params, rid)
+        if err:
+            return err
+    # The client sends session_id, not profile; the live session is authoritative.
+    home = (session or {}).get("profile_home")
+    scopes = _bind_build_profile_scopes(home) if home else None
+    try:
+        return _configure_session_tools(rid, params, sid, session)
+    finally:
+        if scopes is not None:
+            _release_build_profile_scopes(scopes)
+
+
+def _configure_session_tools(rid, params: dict, sid: str, session) -> dict:
     action = str(params.get("action", "") or "").strip().lower()
     targets = [str(name).strip() for name in params.get("names", []) or [] if str(name).strip()]
     if action not in {"disable", "enable"}:
@@ -1000,8 +1014,6 @@ def _(rid, params: dict) -> dict:
         tc._apply_toolset_change(cfg, "cli", toolset_targets, action)
     missing_servers = tc._apply_mcp_change(cfg, mcp_targets, action) if mcp_targets else set()
     hc.save_config(cfg)
-    sid = params.get("session_id", "")
-    session = _sessions.get(sid)
     info = _reset_session_agent(sid, session) if session else None
     enabled = sorted(tc._get_platform_tools(hc.load_config(), "cli", include_default_mcp_servers=False))
     changed = [
@@ -1297,6 +1309,14 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, {"ok": True, **poll(_str_arg(params, "session_id"), _str_arg(params, "name"))})
 
 
+@_mcp_rpc("oauth.cancel", _NAME_SESSION)
+def _(rid, params: dict) -> dict:
+    """Cancel a flow owned by the resolved profile, waking its callback worker."""
+    home = str(_tools_mod("hermes_constants").get_hermes_home().expanduser().resolve(strict=False))
+    cancel = _tools_mod("tui_gateway.mcp_oauth_sessions").cancel_flow
+    return _ok(rid, cancel(_str_arg(params, "session_id"), _str_arg(params, "name"), home))
+
+
 @_mcp_rpc("oauth.callback", _NAME_SESSION)
 def _(rid, params: dict) -> dict:
     """Relay a client-captured redirect (``code``/``state``/``error``) into a ``client_redirect_uri`` flow."""
@@ -1309,7 +1329,10 @@ def _(rid, params: dict) -> dict:
 # ─── Plugins ─────────────────────────────────────────────────────────────────
 def _plugin_rows() -> list[dict]:
     pc = _tools_mod("hermes_cli.plugins_cmd")
+    cat = _tools_mod("hermes_cli.plugins_cmd_catalog")
     enabled, disabled = pc._get_enabled_set(), pc._get_disabled_set()
+    pins = cat.catalog_pins()  # powers the desktop's "Update to <pin>" affordance
+    ref_pins = pc._read_install_metadata()  # ``--ref`` installs: pinned_sha so the desktop can show the pin
     out = []
     for name, version, desc, source, _dir, key in sorted(pc._discover_all_plugins()):
         status = pc._plugin_status(name, enabled, disabled, key=key)
@@ -1318,9 +1341,16 @@ def _plugin_rows() -> list[dict]:
         if status == "not enabled" and source == "bundled" and pc._bundled_default_on(_dir):
             status = "enabled"
         # key = canonical registry key (names collide across category dirs); portable = Agent Plugins v1.
+        # ``has_desktop_half``: the package also ships a Desktop UI half (``desktop/plugin.js``). The
+        # desktop app pairs its app-level copy of that half with this row so one package is ONE row.
+        _dir_path = Path(str(_dir)) if _dir else None
         out.append({
             "name": name, "key": key, "version": str(version or ""), "description": desc or "",
-            "source": source, "status": status, "portable": pc._is_portable_plugin_dir(_dir)})
+            "source": source, "status": status, "portable": pc._is_portable_plugin_dir(_dir),
+            "install_dir": str(_dir_path) if _dir_path else "",
+            "has_desktop_half": bool(_dir_path and (_dir_path / "desktop" / "plugin.js").is_file()),
+            **cat.catalog_row_fields(_dir, pins),
+            **({"pinned_sha": sha} if (sha := pc.pinned_revision(name, ref_pins)) else {})})
     return out
 
 
@@ -1344,22 +1374,45 @@ def _plugins_toggle(rid, params):
 
 
 def _plugins_install(rid, params):
+    # ``catalog_name`` alone installs a curated entry at its pinned SHA (resolved server-side, kill list
+    # enforced, no bypass) — same contract as the dashboard endpoint.
     ident = (params.get("identifier") or params.get("repo") or "").strip()
-    if not ident:
-        return _err(rid, 4019, "plugins.install requires 'identifier' or 'repo'")
+    catalog_name = str(params.get("catalog_name") or "").strip()
+    if not ident and not catalog_name:
+        return _err(rid, 4019, "plugins.install requires 'identifier', 'repo', or 'catalog_name'")
     result = _tools_mod("hermes_cli.plugins_cmd").dashboard_install_plugin(
-        ident, force=bool(params.get("force")), enable=params.get("enable", True))
+        ident, force=bool(params.get("force")), enable=params.get("enable", True), catalog_name=catalog_name or None,
+        ref=str(params.get("ref") or "").strip() or None)
     return _ok(rid, result) if result.get("ok") else _err(rid, 5026, result.get("error") or "install failed")
 
 
-_PLUGINS_ACTIONS = {"list": _plugins_list, "toggle": _plugins_toggle, "install": _plugins_install}
+def _plugins_update(rid, params):
+    """Catalog installs only: re-pin to the current catalog SHA (non-catalog installs update via the CLI)."""
+    name = (params.get("name") or "").strip()
+    if not name:
+        return _err(rid, 4019, "plugins.update requires a 'name'")
+    pc, cat = _tools_mod("hermes_cli.plugins_cmd"), _tools_mod("hermes_cli.plugins_cmd_catalog")
+    target = pc._plugins_dir() / name
+    sidecar = cat.read_catalog_sidecar(target) if target.is_dir() else None
+    if not sidecar:
+        return _err(rid, 4020, f"'{name}' is not a catalog install — update it via the CLI")
+    try:
+        sha, changed = cat.repin_catalog_plugin(target, sidecar)
+    except pc.PluginOperationError as e:
+        return _err(rid, 4021, str(e))
+    return _ok(rid, {"ok": True, "unchanged": not changed, "sha": sha})
+
+
+_PLUGINS_ACTIONS = {"list": _plugins_list, "toggle": _plugins_toggle, "install": _plugins_install,
+                    "update": _plugins_update}
 
 
 @_scoped_rpc("plugins.manage", 5026, catch_resolve=False)
 def _(rid, params: dict) -> dict:
     """TUI Plugins Hub backend (shares primitives with ``hermes plugins`` / the dashboard):
     ``list`` → {plugins, user_count, bundled_count}; ``toggle`` flips ``key``/``name`` per ``enable``;
-    ``install`` git-clones ``identifier``/``repo`` (``force``, ``enable`` default True)."""
+    ``install`` git-clones ``identifier``/``repo`` or a curated ``catalog_name`` (``force``, ``enable``
+    default True); ``update`` re-pins a catalog install to the current catalog SHA."""
     return _run_action(rid, params, _PLUGINS_ACTIONS, "plugins")
 
 

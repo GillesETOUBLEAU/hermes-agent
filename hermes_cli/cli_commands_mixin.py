@@ -1686,6 +1686,8 @@ class CLICommandsMixin:
                 # in last_delivery_error (last_error is None).
                 if status == "delivery_failed" and job.get("last_delivery_error"):
                     status = f"delivery_failed: {job['last_delivery_error']}"
+                elif status == "error" and job.get("last_error"):
+                    status = f"error: {job['last_error']}"
                 print(f"  Last run: {job['last_run_at']} ({status})")
             print()
 
@@ -1919,8 +1921,12 @@ class CLICommandsMixin:
         runtime = turn_route["runtime"]
 
         def produce():
+            from agent.vault_backends.unlock import set_code_prompt_callback, set_save_login_prompt_callback, set_unlock_prompt_callback
             set_sudo_password_callback(self._sudo_password_callback)
             set_approval_callback(self._approval_callback)
+            set_unlock_prompt_callback(self._vault_unlock_callback)
+            set_save_login_prompt_callback(self._vault_save_login_callback)
+            set_code_prompt_callback(self._vault_code_callback)
             with suppress(Exception):
                 set_secret_capture_callback(self._secret_capture_callback)
             try:
@@ -1958,6 +1964,9 @@ class CLICommandsMixin:
                     set_sudo_password_callback(None)
                     set_approval_callback(None)
                     set_secret_capture_callback(None)
+                    set_unlock_prompt_callback(None)
+                    set_save_login_prompt_callback(None)
+                    set_code_prompt_callback(None)
 
         def done():
             self._background_tasks.pop(task_id, None)
