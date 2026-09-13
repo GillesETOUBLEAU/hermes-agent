@@ -636,10 +636,11 @@ class AIAgent(
     @staticmethod
     def _provider_model_requires_responses_api(model: str, *, provider: Optional[str] = None) -> bool:
         """Return True when this provider/model pair should use Responses API."""
+        from hermes_cli.providers import is_actual_route
         normalized_provider = (provider or "").strip().lower()
         # Nous serves GPT-5.x via chat completions (its /v1/responses returns 404); generic custom endpoints
         # may relay GPT-5 without full Responses semantics — only direct OpenAI/xAI URLs auto-upgrade.
-        if normalized_provider in ("nous", "custom"):
+        if normalized_provider in ("nous", "custom") or is_actual_route(provider):
             return False
         if normalized_provider == "copilot":
             try:
@@ -1252,9 +1253,9 @@ class AIAgent(
         if decision.should_halt:
             self._set_tool_guardrail_halt(decision)
         else:
-            # observe_call may have raised the identical-call streak halt (hard_stop_enabled, tool-agnostic).
+            # observe_call may have raised the identical-call streak or batch-cycle halt (hard_stop_enabled, tool-agnostic).
             streak_halt = self._tool_guardrails.halt_decision
-            if streak_halt is not None and streak_halt.code == "identical_call_streak_halt":
+            if streak_halt is not None and streak_halt.code in ("identical_call_streak_halt", "identical_cycle_halt"):
                 function_result = append_toolguard_guidance(function_result, streak_halt)
                 self._set_tool_guardrail_halt(streak_halt)
         if stall_notice:
