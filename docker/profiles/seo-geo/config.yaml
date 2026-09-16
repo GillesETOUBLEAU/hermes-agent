@@ -23,6 +23,14 @@ terminal:
 toolsets:
   - kanban
 
+# Tool Search désactivé (2026-09-16) : le pont tool_search/tool_call fait
+# produire à deepseek-v4-flash du JSON imbriqué invalide (balises DSML parasites)
+# en cron long. Les outils MCP repassent en function-calling natif (~1,6 % de
+# contexte). Guillemets obligatoires : `off` nu est lu comme booléen YAML.
+tools:
+  tool_search:
+    enabled: "off"
+
 # Approbations shell arbitrées par un side-model (Gemini Flash via OpenRouter) —
 # indispensable pour les runs cron non supervisés. Provider épinglé sur openrouter
 # ("auto" tentait Nous en fallback → warning "Auxiliary Nous client unavailable").
