@@ -124,9 +124,15 @@ toolsets:
 # triage → kanban_create, jamais d'exécution). Discord garde son preset complet
 # (voice, chat) ; la discipline route-only est portée par la persona + le modèle
 # Opus, pas par une restriction d'outils.
+#
+# ⚠️ `kanban` DOIT figurer dans chaque liste (upstream 3d7f773bb4, merge 2026-09-16) :
+# le `toolsets: [kanban]` racine n'est plus qu'un repli quand la plateforme n'a pas
+# de liste propre — une liste explicite fait autorité et masquait kanban_* au
+# dispatcher. `x_search` est explicite aussi : dès qu'un toolset nommé est ajouté,
+# la liste passe en mode explicite et ce toolset default-off serait retiré.
 platform_toolsets:
-  cli: [hermes-cli]
-  discord: [hermes-discord]
+  cli: [hermes-cli, kanban, x_search]
+  discord: [hermes-discord, kanban, x_search]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DeepL — serveur MCP hébergé (Streamable HTTP), traduction / reformulation /
