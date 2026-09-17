@@ -97,3 +97,11 @@ skills:
     - weights-and-biases
     - whatsapp-decision-report
     - yuanbao
+
+# Railway: named profiles no longer inherit the container env in the Desktop TUI
+# (upstream fdd5995ecb). docker/entrypoint.sh dumps the Railway vars to a tmpfs
+# file at boot; this helper shares them with the profile's credential scope.
+secrets:
+  command:
+    enabled: true
+    command: "cat /dev/shm/hermes-shared-secrets.env"

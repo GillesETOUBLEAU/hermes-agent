@@ -579,6 +579,37 @@ echo "[entrypoint] .env contents:"
 cat "$HERMES_HOME/.env"
 echo "[entrypoint] --- end .env ---"
 
+# Shared credentials for the named profiles (Railway-only).
+# Since upstream fdd5995ecb / 5ca670b398 (v0.21.3), a dashboard that serves more
+# than one profile — which the Desktop app does — builds each NAMED profile's
+# credential scope from its own .env + secret sources ONLY; the process env is
+# trusted for the launch (default) profile alone. On Railway every key lives in
+# the process env, so the Desktop TUI on web-dev/xpeng/... died with "No LLM
+# provider configured". Re-share them explicitly: dump the container env (at this
+# point, incl. derived exports) to a tmpfs file readable only by hermes, and each
+# profile template enables `secrets.command` to cat it. Never on the volume;
+# rewritten from the Railway vars on every boot, so no stale copy survives a
+# rotation. Written before the side-ticker so its first `hermes -p` finds it.
+HERMES_SHARED_SECRETS_FILE=/dev/shm/hermes-shared-secrets.env
+if [ -n "$RAILWAY_ENVIRONMENT" ]; then
+    python3 - "$HERMES_SHARED_SECRETS_FILE" <<'PY' || echo "[entrypoint] WARNING: shared secrets file not written — named profiles will lack credentials in the Desktop TUI"
+import os, re, sys
+path = sys.argv[1]
+skip = {"PATH", "HOME", "PWD", "OLDPWD", "SHLVL", "HOSTNAME", "TERM", "_"}
+lines = [
+    f'{k}="{v}"\n' for k, v in sorted(os.environ.items())
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k) and k not in skip
+    and not k.startswith("RAILWAY_") and v.strip() and "\n" not in v and "\r" not in v
+]
+tmp = f"{path}.tmp"
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as f:
+    f.writelines(lines)
+os.replace(tmp, path)
+print(f"[entrypoint] shared secrets: {len(lines)} vars -> {path} (0600, tmpfs)")
+PY
+fi
+
 # Cron ticker for secondary profiles (Railway runs a single foreground gateway
 # on the default profile; without gateway.multiplex_profiles the built-in
 # ticker only owns the default store — upstream #69377 — so named-profile cron
